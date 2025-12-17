@@ -13,7 +13,7 @@ with col_left:
     ticker = st.text_input("Ticker", value="AAPL", placeholder="e.g., AAPL, MSFT, SPY")
     lookback = st.slider("Lookback window (days)", min_value=60, max_value=1000, value=252, step=10)
     k_fraction = st.slider("Kelly fraction multiplier", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
-    st.caption("Data source: yfinance (adjusted close). No API key required.")
+    st.caption("Data source: yfinance (close). No API key required.")
 
 if ticker:
     price_df = fetch_price_history(ticker, lookback)

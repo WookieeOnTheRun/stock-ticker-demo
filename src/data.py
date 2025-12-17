@@ -16,8 +16,8 @@ def fetch_price_history(ticker: str, period_days: int) -> pd.DataFrame:
     start = end - timedelta(days=period_days + 30)
     df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
     if df.empty:
-        return pd.DataFrame(columns=["Date", "Adj Close"]).set_index("Date")
-    out = df[["Adj Close"]].copy()
+        return pd.DataFrame(columns=["Date", "Close"]).set_index("Date")
+    out = df[["Close"]].copy()
     out.index = pd.to_datetime(out.index)
     out = out.sort_index()
     out = out.tail(period_days)  # limit to requested window
@@ -32,7 +32,7 @@ def compute_returns(price_df: pd.DataFrame) -> pd.DataFrame:
     """
     if price_df is None or price_df.empty:
         return pd.DataFrame(columns=["simple_return", "log_return"]) 
-    adj = price_df["Adj Close"].astype(float)
+    adj = price_df["Close"].astype(float)
     simple = adj.pct_change().dropna()
     ratio = (adj / adj.shift(1)).dropna()
     logret = np.log(ratio)

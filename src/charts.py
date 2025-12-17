@@ -4,8 +4,8 @@ import plotly.graph_objs as go
 
 def price_chart(price_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=price_df.index, y=price_df["Adj Close"], mode="lines", name="Adj Close"))
-    fig.update_layout(title="Adjusted Close Price", xaxis_title="Date", yaxis_title="Price")
+    fig.add_trace(go.Scatter(x=price_df.index, y=price_df["Close"], mode="lines", name="Close"))
+    fig.update_layout(title="Close Price", xaxis_title="Date", yaxis_title="Price")
     return fig
 
 
