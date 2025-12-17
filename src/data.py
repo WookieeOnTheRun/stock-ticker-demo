@@ -31,11 +31,10 @@ def compute_returns(price_df: pd.DataFrame) -> pd.DataFrame:
     Returns DataFrame with columns: [simple_return, log_return].
     """
     if price_df is None or price_df.empty:
-        return pd.DataFrame(columns=["simple_return", "log_return"]) 
-    adj = price_df["Close"].astype(float)
+        return pd.DataFrame(columns=["simple_return", "log_return"])
+    adj = price_df["Close"].squeeze().astype(float)
     simple = adj.pct_change().dropna()
-    ratio = (adj / adj.shift(1)).dropna()
-    logret = np.log(ratio)
+    logret = np.log(adj / adj.shift(1)).dropna()
     returns = pd.DataFrame({
         "simple_return": simple,
         "log_return": logret
