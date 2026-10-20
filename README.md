@@ -38,13 +38,35 @@ streamlit run src/app.py
 
 Open the provided local URL in your browser.
 
-## Tests
-
-With dependencies installed (step 2 above):
+4. Optional: install the git hooks so ruff runs on every commit:
 
 ```bash
-pytest
+pre-commit install
 ```
+
+## Checks
+
+With dependencies installed (step 2 above), run the same checks as CI:
+
+```bash
+ruff check              # lint (add --fix to auto-fix)
+ruff format --check     # formatting (drop --check to reformat)
+mypy src/stockapp       # strict type checking
+pytest                  # tests; network access is blocked, so they run offline
+pip-audit --skip-editable  # known vulnerabilities in installed packages
+```
+
+CI (`.github/workflows/ci.yml`) runs these on every push and pull request for Python 3.12 and 3.13.
+
+## Project layout
+
+- `src/app.py`: Streamlit entry point
+- `src/stockapp/`: installable package (`data`, `kelly`, `charts`)
+- `tests/`: pytest suite; `tests/fixtures.py` generates synthetic prices
+
+## Secrets
+
+The app needs no secrets today. If a later feature does, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (git-ignored) and fill it in locally.
 
 ## Dependencies
 
