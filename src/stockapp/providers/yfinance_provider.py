@@ -159,3 +159,23 @@ class YFinanceProvider:
         if ticker not in self._currency:
             raise ProviderUnavailable(f"The data provider returned no currency for '{ticker}'")
         return self._currency[ticker]
+
+    def get_sector(self, ticker: str) -> str | None:
+        """
+        Sector name from Ticker.get_info()["sector"] (yfinance 1.7.0; e.g. "Technology", "Financial Services"), or
+        None for ETFs, indices and other non-equities. get_info() takes no timeout argument: yfinance applies its own
+        fixed 30-second timeout per request. Retries and error mapping are the same as for bars.
+        """
+
+        def attempt() -> str | None:
+            try:
+                info = yf.Ticker(ticker).get_info()
+            except Exception as exc:
+                mapped = map_error(ticker, exc)
+                if mapped is None:
+                    raise
+                raise mapped from exc
+            sector = (info or {}).get("sector")
+            return str(sector) if sector else None
+
+        return with_retries(attempt)
