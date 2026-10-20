@@ -10,6 +10,8 @@ from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ra
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
+METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]
+BOOTSTRAP_METHODS = {"Gaussian", "Shrunk"}
 
 # Fetch once per ticker per hour; slider changes only slice the cached data.
 fetch_cached = st.cache_data(ttl=3600, show_spinner="Fetching price history...")(fetch_price_history)
@@ -50,6 +52,7 @@ with col_left:
         "Modelling assumption: before seeing data, the stock's annual expected excess return is believed to be "
         "within about ±2 prior SDs of zero. Smaller values shrink Kelly harder toward 0."
     )
+    method = st.selectbox("Kelly estimate method", METHODS, index=METHODS.index("Shrunk"))
     max_dd_pct = st.slider("Max tolerable drawdown", min_value=10, max_value=50, value=25, step=5, format="%d%%")
     st.caption("Probability of exceeding it over 1 year ≈ 10%.")
     st.caption("Data source: yfinance (adjusted close). No API key required.")
@@ -102,10 +105,29 @@ if len(returns_df) < lookback:
 rf_df = rf_all.loc[returns_df.index]
 excess = excess_returns(returns_df["simple_return"], rf_df)
 kr = fractional_kelly(returns_df["simple_return"], k_fraction=k_fraction, rf=rf_df)
-shrunk_raw = shrunk_kelly(excess, prior_sd_annual)
-log_opt_raw = log_optimal_cached(returns_df["simple_return"], rf_df)
+max_dd = max_dd_pct / 100
+
+
+def raw_kelly(method_name: str, r: pd.Series, rf: pd.Series) -> float:
+    """Unclamped Kelly f* for one method on returns r with matching risk-free rates rf."""
+    if method_name == "Gaussian":
+        return fractional_kelly(r, rf=rf).raw_kelly
+    if method_name == "Shrunk":
+        return shrunk_kelly(excess_returns(r, rf), prior_sd_annual)
+    if method_name == "Log-optimal":
+        return log_optimal_cached(r, rf)
+    return drawdown_kelly_cached(r, rf, max_dd)
+
+
+def applied(raw: float) -> float:
+    """Applied fraction: clip(fraction slider * raw f*, 0, 1). Long-only, no leverage."""
+    return max(0.0, min(k_fraction * raw, 1.0))
+
+
+raws = {m: raw_kelly(m, returns_df["simple_return"], rf_df) for m in METHODS}
 gauss_band, shrunk_band = bootstrap_bands(excess, prior_sd_annual)
-dd_raw = drawdown_kelly_cached(returns_df["simple_return"], rf_df, max_dd_pct / 100)
+method_bands = {"Gaussian": gauss_band, "Shrunk": shrunk_band}
+applied_f = applied(raws[method])
 
 # Charts
 st.subheader("Charts")
@@ -122,10 +144,35 @@ metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
 metrics_col1.metric("CAGR", f"{cagr(close):.1%}")
 metrics_col2.metric("Annualized volatility", f"{annualized_volatility(returns_df['simple_return']):.1%}")
 metrics_col3.metric("Sharpe ratio (excess)", f"{sharpe_ratio(excess):.2f}")
-metrics_col4.metric("Growth at applied fraction", f"{growth_rate(kr.applied_kelly, rf_df, excess):.1%}")
+metrics_col4.metric(f"Growth at applied fraction ({method})", f"{growth_rate(applied_f, rf_df, excess):.1%}")
 st.caption("Growth at applied fraction is a second-order approximation: g(f) ≈ 252·[mean(rf) + f·mean(e) − f²σ²/2].")
 
-st.metric(label="Applied Fractional Kelly", value=f"{kr.applied_kelly:.4f}", delta=f"fraction={kr.fraction:.2f}")
+st.metric(label=f"Applied Fractional Kelly ({method})", value=f"{applied_f:.4f}", delta=f"fraction={kr.fraction:.2f}")
+
+if gauss_band.crosses_zero:
+    st.info(
+        "The data can't distinguish this stock's expected excess return from zero; Kelly sizing is unreliable here."
+    )
+
+notes = {
+    "Gaussian": f"(μ − r) / σ² of excess returns. P(f* > 0) = {gauss_band.prob_positive:.0%}.",
+    "Shrunk": f"Mean shrunk toward 0 by its noise (prior SD {prior_sd_annual:.0%}). P(f* > 0) = "
+    f"{shrunk_band.prob_positive:.0%}.",
+    "Log-optimal": "Maximizes historical mean log growth; no Gaussian assumption (fat-tail aware).",
+    "Drawdown-constrained": f"Largest f with a 90% chance of max drawdown ≤ {max_dd_pct}% over 1 year.",
+}
+comparison = pd.DataFrame(
+    {
+        "Method": METHODS,
+        "Raw f*": [f"{raws[m]:.3f}" for m in METHODS],
+        "Applied f": [f"{applied(raws[m]):.3f}" for m in METHODS],
+        "Bootstrap 5–95% (raw f*)": [
+            f"{method_bands[m].p5:.2f} to {method_bands[m].p95:.2f}" if m in method_bands else "—" for m in METHODS
+        ],
+        "Note": [notes[m] for m in METHODS],
+    }
+).set_index("Method")
+st.table(comparison)
 
 with st.expander("Advanced"):
     adv1, adv2, adv3, adv4 = st.columns(4)
@@ -133,27 +180,36 @@ with st.expander("Advanced"):
     adv2.metric("Variance (daily)", f"{kr.variance:.6f}")
     adv3.metric("Std dev (daily)", f"{kr.stdev:.6f}")
     adv4.metric("Mean risk-free (daily)", f"{rf_df.mean():.6f}")
-    adv5, adv6, adv7, adv8 = st.columns(4)
-    adv5.metric("Raw Kelly ((mu-r)/var)", f"{kr.raw_kelly:.4f}")
-    adv6.metric("Shrunk Kelly (raw)", f"{shrunk_raw:.4f}")
-    adv7.metric("Log-optimal Kelly (raw)", f"{log_opt_raw:.4f}")
-    adv8.metric(f"Drawdown-constrained (max DD {max_dd_pct}%)", f"{dd_raw:.2f}")
-    for name, band in (("Gaussian", gauss_band), ("Shrunk", shrunk_band)):
+    for name, band in method_bands.items():
         st.caption(
             f"{name} Kelly bootstrap: 5th {band.p5:.2f} · median {band.p50:.2f} · 95th {band.p95:.2f} · "
             f"P(f* > 0) = {band.prob_positive:.0%}"
         )
 
 # Kelly across fixed windows of full history (independent of the lookback slider); skip windows longer than the data
-kelly_by_window = {
-    w: fractional_kelly(returns_all["simple_return"].tail(w), k_fraction=k_fraction, rf=rf_all).applied_kelly
-    for w in WINDOW_SIZES
-    if w <= len(returns_all)
-}
-st.plotly_chart(kelly_over_windows_chart(kelly_by_window))
+kelly_by_window: dict[int, float] = {}
+window_bands: dict[int, tuple[float, float]] = {}
+for w in WINDOW_SIZES:
+    if w > len(returns_all):
+        continue
+    r_w = returns_all["simple_return"].tail(w)
+    rf_w = rf_all.loc[r_w.index]
+    kelly_by_window[w] = applied(raw_kelly(method, r_w, rf_w))
+    if method in BOOTSTRAP_METHODS:
+        g_band, s_band = bootstrap_bands(excess_returns(r_w, rf_w), prior_sd_annual)
+        band = g_band if method == "Gaussian" else s_band
+        window_bands[w] = (applied(band.p5), applied(band.p95))
+st.plotly_chart(
+    kelly_over_windows_chart(
+        kelly_by_window, bands=window_bands, title=f"Applied Kelly Across Lookback Windows ({method})"
+    )
+)
+if method in BOOTSTRAP_METHODS:
+    st.caption("Error bars: bootstrap 5–95% range of the applied fraction.")
 
 # Data preview and download
 st.subheader("Data")
-st.dataframe(returns_df.tail(20))
-csv = returns_df.to_csv().encode("utf-8")
+export_df = returns_df.assign(rf_daily=rf_df, excess_return=excess)
+st.dataframe(export_df.tail(20))
+csv = export_df.to_csv().encode("utf-8")
 st.download_button("Download returns CSV", data=csv, file_name=f"{ticker}_returns.csv", mime="text/csv")
