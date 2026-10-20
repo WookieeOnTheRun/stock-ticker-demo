@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 import cvxpy as cp
@@ -10,6 +11,8 @@ from cvxpy.atoms.norm1 import norm1
 from cvxpy.atoms.sum_squares import sum_squares
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import squareform
+
+logger = logging.getLogger(__name__)
 
 SOLVER = cp.CLARABEL  # interior point: meets constraints to ~1e-9; OSQP's default tolerance (~1e-4) is too loose
 FRONTIER_POINTS = 25
@@ -36,6 +39,7 @@ class Allocation:
 
 def equal_weight(n: int, gross_max: float = 1.0, reason: str = "") -> Allocation:
     """Equal weight min(1, gross_max) / n per asset: the labelled fallback when the optimizer fails."""
+    logger.warning("optimizer fallback", extra={"event": "optimizer_fallback", "reason": reason, "assets": n})
     weights = np.full(n, min(1.0, gross_max) / n)
     return Allocation(weights, 1.0 - float(weights.sum()), "fallback", True, reason)
 

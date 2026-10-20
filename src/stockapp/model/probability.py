@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 
 import lightgbm as lgb
@@ -9,6 +10,8 @@ from sklearn.metrics import roc_auc_score
 from stockapp.backtest.walkforward import make_folds
 from stockapp.model.cv import purged_kfold
 from stockapp.model.features import WARMUP, build_features, forward_excess_label
+
+logger = logging.getLogger(__name__)
 
 HYPER_GRID: tuple[dict[str, int], ...] = tuple(
     {"num_leaves": leaves, "n_estimators": trees} for leaves in (7, 15) for trees in (100, 200)
@@ -178,6 +181,16 @@ def walk_forward_model(
         "Out-of-sample predictions": float(len(y)),
         "Base rate (out-of-sample)": float(y.mean()),
     }
+    has_skill = metrics["Brier"] < metrics["Brier (climatology)"]
+    logger.info(
+        "model skill",
+        extra={
+            "event": "model_skill" if has_skill else "model_no_skill",
+            "horizon": horizon,
+            "brier": round(metrics["Brier"], 5),
+            "brier_climatology": round(metrics["Brier (climatology)"], 5),
+        },
+    )
     final = fit_window(features.iloc[: len(features) - horizon], labels.iloc[: len(features) - horizon], horizon)
     latest = features.iloc[[-1]]
     return ModelReport(
@@ -187,7 +200,7 @@ def walk_forward_model(
         labels=realized,
         metrics=metrics,
         reliability=reliability_table(p, y),
-        has_skill=metrics["Brier"] < metrics["Brier (climatology)"],
+        has_skill=has_skill,
         latest_probability=float(final.predict(latest)[0]),
         latest_contributions=final.contributions(latest).iloc[0],
         trials=len(HYPER_GRID),

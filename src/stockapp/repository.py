@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
@@ -74,6 +75,7 @@ def _incremental_update(provider: PriceProvider, store: Store, ticker: str, log:
             ticker,
             relative_diff,
             len(comparable),
+            extra={"event": "restatement_refetch", "ticker": ticker, "provider": provider.name},
         )
         _full_refresh(provider, store, ticker, log.history_start, now)
         return
@@ -114,17 +116,33 @@ def load_bars(
     freshness = freshness if freshness is not None else timedelta(hours=config.FRESHNESS_HOURS)
     start = history_start(now.date(), years)
 
+    started = time.perf_counter()
     log = store.get_fetch_log(provider.name, normalized)
+    cache = "hit"
     try:
         if log is None or not _covers(log, start):
+            cache = "miss"
             _full_refresh(provider, store, normalized, start, now)
         elif now - log.last_fetched_utc >= freshness:
+            cache = "incremental"
             _incremental_update(provider, store, normalized, log, now)
     except (ProviderUnavailable, RateLimited) as exc:
         if log is None:
             raise
+        cache = "stale_fallback"
         logger.warning("Serving cached bars for %s: %s", normalized, exc)
-    return store.get_bars(provider.name, normalized, start)
+    bars = store.get_bars(provider.name, normalized, start)
+    logger.info(
+        "data fetch",
+        extra={
+            "event": "data_fetch",
+            "ticker": normalized,
+            "provider": provider.name,
+            "cache": cache,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+        },
+    )
+    return bars
 
 
 def load_currency(ticker: str, *, provider: PriceProvider | None = None, store: Store | None = None) -> str | None:

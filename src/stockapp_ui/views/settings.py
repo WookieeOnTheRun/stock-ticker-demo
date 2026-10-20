@@ -4,7 +4,7 @@ import streamlit as st
 
 from stockapp.portfolio_input import WatchlistError, parse_ticker_text
 from stockapp.userstore import UserDataError, UserStore
-from stockapp_ui import auth, state
+from stockapp_ui import auth, diagnostics, state
 
 
 def _load_watchlist(store: UserStore, sub_hash: str, name: str) -> None:
@@ -107,3 +107,18 @@ def render() -> None:
         st.info("Sign in from the sidebar to save watchlists and settings.")
     else:
         st.caption("Saved watchlists and settings need sign-in, which isn't configured on this server.")
+
+    if diagnostics.enabled():
+        with st.expander("Diagnostics"):
+            events = diagnostics.session_events()
+            hits = sum(e.cache == "hit" for e in events)
+            st.metric("App version", diagnostics.app_version())
+            st.metric("Data-layer cache hit rate (this session)", f"{hits / len(events):.0%}" if events else "n/a")
+            st.caption(
+                "Counts fetches that reached the SQLite data layer; repeat views served from the in-memory cache "
+                "don't reach it."
+            )
+            if events:
+                st.dataframe(
+                    [{"ticker": e.ticker, "cache": e.cache, "ms": e.duration_ms} for e in reversed(events[-20:])]
+                )
