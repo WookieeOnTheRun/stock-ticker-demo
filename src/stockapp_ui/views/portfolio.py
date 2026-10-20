@@ -1,4 +1,4 @@
-"""Streamlit UI for the Portfolio tab. Analytics live in stockapp.*; this module only gathers input and renders."""
+"""Portfolio page: watchlist input, robust estimation, constrained Kelly vs HRP, frontier and trades."""
 
 from collections.abc import Callable
 
@@ -18,6 +18,7 @@ from stockapp.portfolio_input import (
     shares_to_weights,
 )
 from stockapp.trades import TAX_NOTE, trade_plan
+from stockapp_ui import cache, state
 
 DEFAULT_TICKERS = "AAPL, MSFT, JNJ, XOM, JPM, SPY"
 
@@ -93,10 +94,13 @@ def _risk_free(daily_rf: DailyRf) -> pd.Series | None:
     return pd.Series((1 + manual / 100) ** (1 / 252) - 1, index=index)
 
 
-def render(load_in_base: LoadInBase, daily_rf: DailyRf, sector_lookup: SectorLookup, years: int | None) -> None:
-    """Render the Portfolio tab. Settings shared with the Stock tab are read from st.session_state."""
+def render() -> None:
+    load_in_base: LoadInBase = cache.load_in_base
+    daily_rf: DailyRf = cache.portfolio_daily_rf
+    sector_lookup: SectorLookup = cache.sector_cached
+    years = state.years()
     base_currency = str(st.session_state.get("base_currency", "USD"))
-    st.caption(f"Uses the Stock tab's base currency ({base_currency}), Kelly fraction and prior SD settings.")
+    st.caption(f"Uses the sidebar's base currency ({base_currency}), Kelly fraction and prior SD settings.")
     watchlist = _watchlist_input()
     if watchlist is None or not watchlist.tickers:
         return
@@ -192,8 +196,7 @@ def _render_analysis(
     if use_sector_caps and all(s is None for s in sectors):
         st.info("No sectors could be looked up, so no sector caps apply.")
     st.caption(
-        f"Kelly fraction c = {c:g} and prior SD {prior:.0%} come from the Stock tab. "
-        "Long-only: no shorting or leverage."
+        f"Kelly fraction c = {c:g} and prior SD {prior:.0%} come from the sidebar. Long-only: no shorting or leverage."
     )
 
     key = "|".join([*tickers, str(data.returns.index[-1].date()), base_currency, str(years), frequency])
@@ -209,7 +212,7 @@ def _render_analysis(
     e3.metric("Observations", f"{len(data.returns)} {frequency.lower()}")
     if cov.jitter > 0:
         st.caption(f"The covariance was not positive definite; {cov.jitter:.2e} was added to its diagonal.")
-    st.caption("Means are shrunk toward 0 like the Stock tab's Shrunk Kelly; covariance shrinkage stabilizes Σ⁻¹.")
+    st.caption("Means are shrunk toward 0 like the Research page's Shrunk Kelly; covariance shrinkage stabilizes Σ⁻¹.")
 
     if analysis.allocation.fallback:
         st.warning(f"Constrained optimizer failed — showing EQUAL WEIGHT instead. Reason: {analysis.allocation.reason}")
@@ -248,7 +251,7 @@ def _render_analysis(
     st.plotly_chart(growth_chart(analysis.split_growth))
     st.caption(
         f"In-sample / out-of-sample split: weights estimated on data before {analysis.split_date.date()} and held "
-        "fixed (rebalanced each period) afterwards. A full walk-forward version is in the Stock tab's Backtest."
+        "fixed (rebalanced each period) afterwards. A full walk-forward version is on the Backtest & Signals page."
     )
 
     st.markdown("**Current vs target (Constrained Kelly)**")
