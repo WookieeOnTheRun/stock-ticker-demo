@@ -2,7 +2,7 @@
 Look-ahead guard (Tier 5, A5). For every registered signal (stockapp.signals.SIGNALS, every grid point)
 and the walk-forward harness itself: compute the output on the full series and on the series truncated at a random
 date t; values up to t must be identical. 20 random cuts per function on seeded synthetic data.
-Feature functions (Part C) must be added here when they are registered.
+Registered feature functions (stockapp.model.features.FEATURES) are checked the same way.
 """
 
 from collections.abc import Callable
@@ -14,6 +14,7 @@ from fixtures import make_prices
 
 from stockapp.backtest.strategies import Strategy, kelly_buy_and_hold
 from stockapp.backtest.walkforward import walk_forward
+from stockapp.model.features import FEATURES, forward_excess_label
 from stockapp.signals import SIGNALS
 
 N_CUTS = 20
@@ -84,3 +85,17 @@ def test_guard_catches_a_leaky_function():
     assert lookahead_violations(leaky, PRICES)
     assert lookahead_violations(centered, PRICES)
     assert not lookahead_violations(lambda p: p.rolling(21).mean(), PRICES)
+
+
+BENCH = make_prices(1600, mu=0.0002, sigma=0.01, seed=22)
+FEATURE_CASES = [pytest.param(name, id=name) for name in FEATURES]
+
+
+@pytest.mark.parametrize("name", FEATURE_CASES)
+def test_registered_features_have_no_lookahead(name):
+    assert_no_lookahead(lambda p: FEATURES[name](p, BENCH.loc[: p.index[-1]]))
+
+
+def test_forward_label_is_flagged_by_the_guard():
+    # Labels look forward by design; the guard must see that, which is why they are never used as features.
+    assert lookahead_violations(lambda p: forward_excess_label(p, RF.loc[: p.index[-1]], 21), PRICES)
