@@ -18,6 +18,8 @@ dependencies = [
     "arch>=8.0,<9",
     "scipy>=1.18,<2",
     "hmmlearn>=0.3.3,<0.4",
+    "scikit-learn>=1.9,<2",
+    "cvxpy>=1.9,<2",
 ]
 
 [project.optional-dependencies]
@@ -57,8 +59,9 @@ files = ["src/stockapp"]
 strict = true
 
 [[tool.mypy.overrides]]
-# None of these ships a py.typed marker and no stub package exists on PyPI.
+# None of these ships a py.typed marker and no stub package exists on PyPI. For sklearn the only one is an unofficial
+# third-party repackage (scikit-learn-stubs 0.0.3), not worth the supply-chain risk for one class.
 module = [
-    "yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*", "hmmlearn", "hmmlearn.*",
+    "yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*", "hmmlearn", "hmmlearn.*", "sklearn", "sklearn.*",
 ]
 ignore_missing_imports = true
