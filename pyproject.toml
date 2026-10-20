@@ -17,6 +17,7 @@ dependencies = [
     "exchange_calendars>=4.13,<5",
     "arch>=8.0,<9",
     "scipy>=1.18,<2",
+    "hmmlearn>=0.3.3,<0.4",
 ]
 
 [project.optional-dependencies]
@@ -57,5 +58,7 @@ strict = true
 
 [[tool.mypy.overrides]]
 # None of these ships a py.typed marker and no stub package exists on PyPI.
-module = ["yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*"]
+module = [
+    "yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*", "hmmlearn", "hmmlearn.*",
+]
 ignore_missing_imports = true
