@@ -10,6 +10,8 @@ anyio==4.15.1
     # via
     #   starlette
     #   streamlit
+arch==8.0.0
+    # via stockapp (pyproject.toml)
 ast-serialize==0.13.1
     # via mypy
 attrs==26.1.0
@@ -56,6 +58,8 @@ filelock==4.2.4
     #   cachecontrol
     #   python-discovery
     #   virtualenv
+formulaic==1.2.2
+    # via statsmodels
 h11==0.16.0
     # via uvicorn
 hypothesis==6.170.5
@@ -68,6 +72,8 @@ idna==3.20
     #   requests
 iniconfig==2.3.1
     # via pytest
+interface-meta==2.0.1
+    # via formulaic
 itsdangerous==2.2.0
     # via streamlit
 jinja2==3.1.6
@@ -103,15 +109,21 @@ mypy-extensions==1.1.0
 narwhals==2.27.1
     # via
     #   altair
+    #   formulaic
     #   plotly
 nodeenv==1.11.0
     # via pre-commit
 numpy==2.5.4
     # via
+    #   arch
     #   exchange-calendars
+    #   formulaic
     #   pandas
     #   pandas-stubs
+    #   patsy
     #   pydeck
+    #   scipy
+    #   statsmodels
     #   stockapp (pyproject.toml)
     #   streamlit
     #   yfinance
@@ -120,17 +132,23 @@ packageurl-python==0.17.6
 packaging==26.3
     # via
     #   altair
+    #   arch
     #   build
+    #   patsy
     #   pip-audit
     #   pip-requirements-parser
     #   plotly
     #   pytest
+    #   statsmodels
     #   streamlit
     #   virtualenv
     #   wheel
 pandas==3.0.6
     # via
+    #   arch
     #   exchange-calendars
+    #   formulaic
+    #   statsmodels
     #   stockapp (pyproject.toml)
     #   streamlit
     #   yfinance
@@ -138,6 +156,8 @@ pandas-stubs==3.0.5.260914
     # via stockapp (pyproject.toml)
 pathspec==1.1.1
     # via mypy
+patsy==1.0.3
+    # via statsmodels
 peewee==4.5.3
     # via yfinance
 pillow==12.3.0
@@ -215,6 +235,11 @@ rpds-py==2026.9.1
     #   referencing
 ruff==0.17.1
     # via stockapp (pyproject.toml)
+scipy==1.18.1
+    # via
+    #   arch
+    #   formulaic
+    #   statsmodels
 six==1.17.0
     # via python-dateutil
 sortedcontainers==2.4.0
@@ -225,6 +250,8 @@ soupsieve==3.0.3
     # via beautifulsoup4
 starlette==1.9.0
     # via streamlit
+statsmodels==0.15.0
+    # via arch
 streamlit==1.66.0
     # via stockapp (pyproject.toml)
 tomli==2.5.0
@@ -239,6 +266,7 @@ typing-extensions==4.16.0
     #   anyio
     #   beautifulsoup4
     #   cyclonedx-python-lib
+    #   formulaic
     #   mypy
     #   referencing
     #   starlette
@@ -259,6 +287,8 @@ websockets==17.3
     #   yfinance
 wheel==0.48.0
     # via pip-tools
+wrapt==2.5.1
+    # via formulaic
 yfinance==1.7.0
     # via stockapp (pyproject.toml)
 
