@@ -1,18 +1,18 @@
 import pandas as pd
 
-from stockapp.data import fetch_price_history
+from stockapp.repository import load_bars
 
 RF_TICKER = "^IRX"  # 13-week US T-bill yield, quoted in annualized percent (e.g. 4.08 means 4.08%)
 TRADING_DAYS = 252
 FFILL_LIMIT = 5  # max consecutive missing rf days carried forward (about one trading week)
 
 
-def fetch_rf_annual_pct() -> pd.Series:
+def fetch_rf_annual_pct(years: int | None = 10) -> pd.Series:
     """
-    Fetch the 13-week US T-bill yield (^IRX) for the last 10 years, in annualized percent.
+    Fetch the 13-week US T-bill yield (^IRX) for the last `years` years (None = all), in annualized percent.
     Uses the same cached data layer as fetch_price_history; raises TickerNotFound if nothing comes back.
     """
-    return fetch_price_history(RF_TICKER)
+    return load_bars(RF_TICKER, years)["adj_close"].rename("Close")
 
 
 def daily_rf(annual_pct: pd.Series) -> pd.Series:

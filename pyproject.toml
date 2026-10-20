@@ -14,6 +14,7 @@ dependencies = [
     "pandas>=3.0,<4",
     "numpy>=2.5,<3",
     "plotly>=7.1,<8",
+    "exchange_calendars>=4.13,<5",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +53,6 @@ files = ["src/stockapp"]
 strict = true
 
 [[tool.mypy.overrides]]
-# Neither ships a py.typed marker and no stub package exists on PyPI.
-module = ["yfinance", "yfinance.*", "plotly", "plotly.*"]
+# None of these ships a py.typed marker and no stub package exists on PyPI.
+module = ["yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*"]
 ignore_missing_imports = true

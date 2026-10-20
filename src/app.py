@@ -1,23 +1,33 @@
+from datetime import date
+
 import pandas as pd
 import streamlit as st
 
 from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, kelly_distribution
+from stockapp.calendars import is_stale, sessions_per_year
 from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
-from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
+from stockapp.data import compute_returns, normalize_ticker
 from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
+from stockapp.repository import load_bars
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
 METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]
+HISTORY_OPTIONS: dict[str, int | None] = {"5y": 5, "10y": 10, "20y": 20, "max": None}
 BOOTSTRAP_METHODS = {"Gaussian", "Shrunk"}
 
 # Short in-memory layer over the SQLite cache (stockapp.repository); slider changes only slice the cached data.
-fetch_cached = st.cache_data(ttl=300, show_spinner="Loading price history...")(fetch_price_history)
 fetch_rf_cached = st.cache_data(ttl=300, show_spinner="Loading risk-free rate...")(fetch_rf_annual_pct)
 log_optimal_cached = st.cache_data(show_spinner=False)(log_optimal_kelly)
 drawdown_kelly_cached = st.cache_data(show_spinner=False)(drawdown_constrained_kelly)
+
+
+@st.cache_data(ttl=300, show_spinner="Loading price history...")
+def load_close(ticker: str, years: int | None) -> pd.Series:
+    """Adjusted closes named "Close" for the last `years` years (None = all available)."""
+    return load_bars(ticker, years)["adj_close"].rename("Close")
 
 
 @st.cache_data(show_spinner=False)
@@ -38,7 +48,8 @@ col_left, col_right = st.columns([3, 2])
 
 with col_left:
     raw_ticker = st.text_input("Ticker", value="MSFT", placeholder="e.g., AAPL, MSFT, SPY")
-    lookback = st.slider("Lookback window (trading days)", min_value=60, max_value=1000, value=252, step=10)
+    history_label = st.selectbox("History", list(HISTORY_OPTIONS), index=list(HISTORY_OPTIONS).index("10y"))
+    lookback_slot = st.empty()  # filled once the available history is known
     k_fraction = st.slider("Kelly fraction multiplier", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
     prior_sd_annual = st.number_input(
         "Prior SD of annual expected excess return",
@@ -59,7 +70,7 @@ with col_left:
     st.caption("Risk-free: 13-week US T-bill (USD). Non-USD tickers should use a local rate (not yet supported).")
 
 try:
-    rf_annual_pct: pd.Series | None = fetch_rf_cached()
+    rf_annual_pct: pd.Series | None = fetch_rf_cached(HISTORY_OPTIONS[history_label])
 except Exception:
     rf_annual_pct = None
 
@@ -82,10 +93,14 @@ if ticker is None:
     st.stop()
 
 try:
-    close_all = fetch_cached(ticker)
+    close_all = load_close(ticker, HISTORY_OPTIONS[history_label])
 except Exception as e:
     st.error(f"Could not load data for {ticker}: {e}")
     st.stop()
+
+if is_stale(ticker, close_all.index[-1].date(), date.today()):
+    st.warning(f"Data for {ticker} may be stale: the last bar is from {close_all.index[-1].date()}.")
+periods_per_year = sessions_per_year(ticker, close_all.index[-1].date())
 
 returns_all = compute_returns(close_all)
 if rf_annual_pct is not None:
@@ -96,6 +111,12 @@ returns_all = returns_all.loc[rf_all.index]
 if len(returns_all) < 2:
     st.error(f"Not enough price history for {ticker} to compute returns.")
     st.stop()
+
+# The slider's range follows the loaded history; a floor of 70 keeps it usable for very short histories.
+max_lookback = max(len(returns_all), 70)
+lookback = lookback_slot.slider(
+    "Lookback window (trading days)", min_value=60, max_value=max_lookback, value=min(252, max_lookback), step=10
+)
 
 close = close_all.tail(lookback + 1)
 returns_df = returns_all.tail(lookback)
@@ -141,11 +162,18 @@ with p2:
 # Kelly breakdown
 st.subheader("Kelly Breakdown")
 metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
-metrics_col1.metric("CAGR", f"{cagr(close):.1%}")
-metrics_col2.metric("Annualized volatility", f"{annualized_volatility(returns_df['simple_return']):.1%}")
-metrics_col3.metric("Sharpe ratio (excess)", f"{sharpe_ratio(excess):.2f}")
-metrics_col4.metric(f"Growth at applied fraction ({method})", f"{growth_rate(applied_f, rf_df, excess):.1%}")
-st.caption("Growth at applied fraction is a second-order approximation: g(f) ≈ 252·[mean(rf) + f·mean(e) − f²σ²/2].")
+metrics_col1.metric("CAGR", f"{cagr(close, periods_per_year):.1%}")
+metrics_col2.metric(
+    "Annualized volatility", f"{annualized_volatility(returns_df['simple_return'], periods_per_year):.1%}"
+)
+metrics_col3.metric("Sharpe ratio (excess)", f"{sharpe_ratio(excess, periods_per_year):.2f}")
+metrics_col4.metric(
+    f"Growth at applied fraction ({method})", f"{growth_rate(applied_f, rf_df, excess, periods_per_year):.1%}"
+)
+st.caption(
+    "Growth at applied fraction is a second-order approximation: g(f) ≈ P·[mean(rf) + f·mean(e) − f²σ²/2], "
+    "with P trading sessions per year."
+)
 
 st.metric(label=f"Applied Fractional Kelly ({method})", value=f"{applied_f:.4f}", delta=f"fraction={kr.fraction:.2f}")
 
@@ -180,6 +208,7 @@ with st.expander("Advanced"):
     adv2.metric("Variance (daily)", f"{kr.variance:.6f}")
     adv3.metric("Std dev (daily)", f"{kr.stdev:.6f}")
     adv4.metric("Mean risk-free (daily)", f"{rf_df.mean():.6f}")
+    st.caption(f"Annualization uses {periods_per_year:.0f} trading sessions per year for {ticker}'s exchange.")
     for name, band in method_bands.items():
         st.caption(
             f"{name} Kelly bootstrap: 5th {band.p5:.2f} · median {band.p50:.2f} · 95th {band.p95:.2f} · "
