@@ -1,5 +1,7 @@
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from stockapp.kelly import fractional_kelly
 
@@ -35,3 +37,14 @@ def test_fraction_within_bounds():
     returns = pd.Series([0.05, -0.05, 0.03, -0.03, 0.002])
     kr = fractional_kelly(returns, k_fraction=0.5)
     assert kr.applied_kelly == pytest.approx(0.5 * returns.mean() / returns.var())
+
+
+# Extreme magnitudes (~1e308) overflow the variance; the clamp must still hold.
+@pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
+@given(
+    returns=st.lists(st.floats(allow_nan=False, allow_infinity=False), min_size=2),
+    k_fraction=st.floats(min_value=0.0, max_value=1.0),
+)
+def test_applied_kelly_always_within_unit_interval(returns, k_fraction):
+    kr = fractional_kelly(pd.Series(returns), k_fraction=k_fraction)
+    assert 0.0 <= kr.applied_kelly <= 1.0
