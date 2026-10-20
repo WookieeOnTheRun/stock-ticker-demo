@@ -94,6 +94,7 @@ narwhals==2.27.1
 numpy==2.5.4
     # via
     #   pandas
+    #   pandas-stubs
     #   pydeck
     #   stockapp (pyproject.toml)
     #   streamlit
@@ -115,6 +116,8 @@ pandas==3.0.6
     #   stockapp (pyproject.toml)
     #   streamlit
     #   yfinance
+pandas-stubs==3.0.5.260914
+    # via stockapp (pyproject.toml)
 pathspec==1.1.1
     # via mypy
 peewee==4.5.3

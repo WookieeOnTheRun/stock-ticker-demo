@@ -23,7 +23,7 @@ def fetch_price_history(ticker: str) -> pd.Series:
     df = yf.download(ticker, period=HISTORY_PERIOD, progress=False, auto_adjust=True, multi_level_index=False)
     if df.empty or "Close" not in df:
         raise LookupError(f"No price data returned for '{ticker}'. Check the ticker symbol.")
-    close = df["Close"].dropna().astype(float).sort_index()
+    close: pd.Series = df["Close"].dropna().astype(float).sort_index()
     close.index = pd.to_datetime(close.index)
     close.index.name = "Date"
     return close
