@@ -4,6 +4,7 @@ import streamlit as st
 from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, kelly_distribution
 from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
 from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
+from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
@@ -13,6 +14,7 @@ WINDOW_SIZES = [60, 120, 252, 504]
 fetch_cached = st.cache_data(ttl=3600, show_spinner="Fetching price history...")(fetch_price_history)
 fetch_rf_cached = st.cache_data(ttl=3600, show_spinner="Fetching risk-free rate...")(fetch_rf_annual_pct)
 log_optimal_cached = st.cache_data(show_spinner=False)(log_optimal_kelly)
+drawdown_kelly_cached = st.cache_data(show_spinner=False)(drawdown_constrained_kelly)
 
 
 @st.cache_data(show_spinner=False)
@@ -47,6 +49,8 @@ with col_left:
         "Modelling assumption: before seeing data, the stock's annual expected excess return is believed to be "
         "within about ±2 prior SDs of zero. Smaller values shrink Kelly harder toward 0."
     )
+    max_dd_pct = st.slider("Max tolerable drawdown", min_value=10, max_value=50, value=25, step=5, format="%d%%")
+    st.caption("Probability of exceeding it over 1 year ≈ 10%.")
     st.caption("Data source: yfinance (adjusted close). No API key required.")
     st.caption("Risk-free: 13-week US T-bill (USD). Non-USD tickers should use a local rate (not yet supported).")
 
@@ -100,6 +104,7 @@ kr = fractional_kelly(returns_df["simple_return"], k_fraction=k_fraction, rf=rf_
 shrunk_raw = shrunk_kelly(excess, prior_sd_annual)
 log_opt_raw = log_optimal_cached(returns_df["simple_return"], rf_df)
 gauss_band, shrunk_band = bootstrap_bands(excess, prior_sd_annual)
+dd_raw = drawdown_kelly_cached(returns_df["simple_return"], rf_df, max_dd_pct / 100)
 
 # Charts
 st.subheader("Charts")
@@ -119,6 +124,7 @@ metrics_col3.metric("Std Dev", f"{kr.stdev:.6f}")
 metrics_col4.metric("Raw Kelly ((mu-r)/var)", f"{kr.raw_kelly:.4f}")
 metrics_col5.metric("Shrunk Kelly (raw)", f"{shrunk_raw:.4f}")
 metrics_col6.metric("Log-optimal Kelly (raw)", f"{log_opt_raw:.4f}")
+st.metric(f"Drawdown-constrained Kelly (max DD {max_dd_pct}%)", f"{dd_raw:.2f}")
 for name, band in (("Gaussian", gauss_band), ("Shrunk", shrunk_band)):
     st.caption(
         f"{name} Kelly bootstrap: 5th {band.p5:.2f} · median {band.p50:.2f} · 95th {band.p95:.2f} · "
