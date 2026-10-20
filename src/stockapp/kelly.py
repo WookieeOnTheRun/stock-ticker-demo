@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 TRADING_DAYS = 252
@@ -71,3 +72,27 @@ def shrunk_kelly(e: pd.Series, prior_sd_annual: float) -> float:
     """Kelly fraction from the shrunk mean: f* = mu_post / var(e). Returns 0 if variance ~ 0."""
     _, var, _ = estimate_stats(e)
     return shrunk_mean(e, prior_sd_annual) / var if var > 1e-12 else 0.0
+
+
+def log_optimal_kelly(r: pd.Series, rf: pd.Series, f_max: float = 10.0, step: float = 0.005) -> float:
+    """
+    Empirical growth-optimal fraction: argmax over f in [0, f_max] of mean(log1p(R_f)),
+    where R_f = rf + f * (r - rf) is the daily portfolio return with fraction f in the stock.
+
+    No Gaussian assumption: the sample's actual tails enter through the log, so the gap between this
+    and the mean/variance Kelly is the fat-tail penalty. Any f for which some day has 1 + R_f <= 0
+    (total loss) is infeasible and skipped. The grid is evaluated as one (grid x observations) array.
+    Returns the unclamped value as a diagnostic; clamp it only when computing an applied fraction.
+    """
+    rf_aligned = rf.reindex(r.index)
+    valid = rf_aligned.notna().to_numpy()
+    r_arr = r.to_numpy(dtype=float)[valid]
+    rf_arr = rf_aligned.to_numpy(dtype=float)[valid]
+    if r_arr.size == 0:
+        return 0.0
+    grid = np.linspace(0.0, f_max, int(round(f_max / step)) + 1)
+    port = rf_arr[None, :] + grid[:, None] * (r_arr - rf_arr)[None, :]
+    feasible = (1.0 + port > 0.0).all(axis=1)
+    log_growth = np.log1p(port, out=np.full_like(port, -np.inf), where=1.0 + port > 0.0)
+    mean_growth = np.where(feasible, log_growth.mean(axis=1), -np.inf)
+    return float(grid[int(np.argmax(mean_growth))])

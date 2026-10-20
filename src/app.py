@@ -3,7 +3,7 @@ import streamlit as st
 
 from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
 from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
-from stockapp.kelly import excess_returns, fractional_kelly, shrunk_kelly
+from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
@@ -11,6 +11,7 @@ WINDOW_SIZES = [60, 120, 252, 504]
 # Fetch once per ticker per hour; slider changes only slice the cached data.
 fetch_cached = st.cache_data(ttl=3600, show_spinner="Fetching price history...")(fetch_price_history)
 fetch_rf_cached = st.cache_data(ttl=3600, show_spinner="Fetching risk-free rate...")(fetch_rf_annual_pct)
+log_optimal_cached = st.cache_data(show_spinner=False)(log_optimal_kelly)
 
 st.set_page_config(page_title="Fractional Kelly Analyzer", layout="wide")
 
@@ -85,6 +86,7 @@ rf_df = rf_all.loc[returns_df.index]
 excess = excess_returns(returns_df["simple_return"], rf_df)
 kr = fractional_kelly(returns_df["simple_return"], k_fraction=k_fraction, rf=rf_df)
 shrunk_raw = shrunk_kelly(excess, prior_sd_annual)
+log_opt_raw = log_optimal_cached(returns_df["simple_return"], rf_df)
 
 # Charts
 st.subheader("Charts")
@@ -97,12 +99,13 @@ with p2:
 
 # Kelly breakdown
 st.subheader("Kelly Breakdown")
-metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5 = st.columns(5)
+metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5, metrics_col6 = st.columns(6)
 metrics_col1.metric("Mean Excess Return (daily)", f"{kr.mean_return:.6f}")
 metrics_col2.metric("Variance", f"{kr.variance:.6f}")
 metrics_col3.metric("Std Dev", f"{kr.stdev:.6f}")
 metrics_col4.metric("Raw Kelly ((mu-r)/var)", f"{kr.raw_kelly:.4f}")
 metrics_col5.metric("Shrunk Kelly (raw)", f"{shrunk_raw:.4f}")
+metrics_col6.metric("Log-optimal Kelly (raw)", f"{log_opt_raw:.4f}")
 
 st.metric(label="Applied Fractional Kelly", value=f"{kr.applied_kelly:.4f}", delta=f"fraction={kr.fraction:.2f}")
 
