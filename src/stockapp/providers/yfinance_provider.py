@@ -56,6 +56,9 @@ def map_error(ticker: str, exc: Exception) -> DataError | None:
     """Translate a yfinance / curl_cffi exception into a typed DataError, or None if it isn't a data error."""
     if isinstance(exc, YFRateLimitError):
         return RateLimited(f"Rate limited while fetching '{ticker}'")
+    if isinstance(exc, ValueError) and str(exc).startswith("Invalid ISIN"):
+        # yfinance 1.7.0 treats 12-character alphanumeric symbols as ISINs and rejects unknown ones this way
+        return TickerNotFound(f"No price data for '{ticker}'. Check the ticker symbol.")
     if isinstance(exc, YFTickerMissingError):
         return TickerNotFound(f"No price data for '{ticker}'. Check the ticker symbol.")
     if isinstance(exc, HTTPError):
@@ -117,8 +120,8 @@ class YFinanceProvider:
 
     def _history(self, ticker: str, **kwargs: Any) -> pd.DataFrame:
         def attempt() -> pd.DataFrame:
-            t = yf.Ticker(ticker)
             try:
+                t = yf.Ticker(ticker)  # the constructor can raise too (and resolves ISIN-like symbols over the network)
                 raw: pd.DataFrame = t.history(
                     interval="1d", auto_adjust=False, actions=True, timeout=TIMEOUT_S, **kwargs
                 )

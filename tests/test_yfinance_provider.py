@@ -131,3 +131,17 @@ def test_transient_failure_then_success_is_retried(patch_ticker):
     assert provider.get_currency("AAPL") == "USD"
     assert provider.get_corporate_actions("AAPL")["type"].tolist() == ["split"]
     assert len(calls) == 2  # currency and actions came from the same response
+
+
+def test_unknown_isin_like_symbol_raises_ticker_not_found(monkeypatch):
+    # yfinance 1.7.0 raises this from the Ticker constructor for 12-character alphanumeric symbols
+    constructed = []
+
+    def failing_ticker(symbol):
+        constructed.append(symbol)
+        raise ValueError(f"Invalid ISIN number: {symbol}")
+
+    monkeypatch.setattr(yf, "Ticker", failing_ticker)
+    with pytest.raises(TickerNotFound):
+        YFinanceProvider().get_daily_bars("ZZZZNOTREAL1", None, None)
+    assert constructed == ["ZZZZNOTREAL1"]  # mapped, not retried
