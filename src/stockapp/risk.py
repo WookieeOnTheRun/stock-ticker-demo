@@ -147,3 +147,31 @@ def garch_vol_forecast(r: pd.Series, horizon: int = 21, periods_per_year: float 
         params={str(k): float(v) for k, v in result.params.items()},
         converged=result.convergence_flag == 0,
     )
+
+
+@dataclass(frozen=True)
+class RiskSummary:
+    historical_var: float
+    historical_cvar: float
+    parametric_var: float
+    drawdown: Drawdown
+    sortino: float
+    calmar: float
+    omega: float
+    rolling_vol: pd.Series
+    ewma_vol: pd.Series
+
+
+def summarize(r: pd.Series, prices: pd.Series, rf: pd.Series, periods_per_year: float = TRADING_DAYS) -> RiskSummary:
+    """All non-GARCH risk analytics for one return series (95% VaR/CVaR, threshold-0 Omega)."""
+    return RiskSummary(
+        historical_var=historical_var(r),
+        historical_cvar=historical_cvar(r),
+        parametric_var=parametric_var(r),
+        drawdown=max_drawdown(prices),
+        sortino=sortino(r, rf, periods_per_year),
+        calmar=calmar(prices, periods_per_year),
+        omega=omega(r),
+        rolling_vol=rolling_vol(r, periods_per_year=periods_per_year),
+        ewma_vol=ewma_vol(r, periods_per_year=periods_per_year),
+    )

@@ -169,3 +169,38 @@ def gaussian_kelly_verdict(r: pd.Series) -> GaussianVerdict:
     else:
         message = "Reasonably: no strong evidence of fat tails, non-normality or volatility clustering in this sample."
     return GaussianVerdict(fat, non_normal, clustering, kurt, jb_p, lb_p, message)
+
+
+@dataclass(frozen=True)
+class DistributionSummary:
+    verdict: GaussianVerdict
+    skewness: float
+    jarque_bera: tuple[float, float]
+    ljung_box: tuple[float, float]
+    ljung_box_squared: tuple[float, float]
+    hurst: float
+    t_fit: StudentTFit
+    qq_normal: pd.DataFrame
+    qq_t: pd.DataFrame
+    acf: np.ndarray
+    acf_squared: np.ndarray
+    acf_band: float
+
+
+def summarize(r: pd.Series) -> DistributionSummary:
+    """All distribution diagnostics for one return series."""
+    t_fit = fit_student_t(r)
+    return DistributionSummary(
+        verdict=gaussian_kelly_verdict(r),
+        skewness=skewness(r),
+        jarque_bera=jarque_bera(r),
+        ljung_box=ljung_box(r),
+        ljung_box_squared=ljung_box(r**2),
+        hurst=hurst_rs(r),
+        t_fit=t_fit,
+        qq_normal=qq_normal(r),
+        qq_t=qq_student_t(r, t_fit),
+        acf=acf(r),
+        acf_squared=acf(r**2),
+        acf_band=acf_band(int(r.dropna().size)),
+    )

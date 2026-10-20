@@ -3,14 +3,31 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from stockapp import distribution, factors, regimes, relative, risk, seasonality
 from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, kelly_distribution
-from stockapp.calendars import is_stale, sessions_per_year
-from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
+from stockapp.calendars import calendar_code, is_stale, sessions_per_year
+from stockapp.charts import (
+    acf_chart,
+    cumulative_return_chart,
+    factor_chart,
+    growth_chart,
+    kelly_over_windows_chart,
+    month_average_chart,
+    price_chart,
+    qq_chart,
+    regime_chart,
+    relative_chart,
+    returns_histogram,
+    seasonality_heatmap,
+    underwater_chart,
+    volatility_chart,
+)
 from stockapp.data import compute_returns, normalize_ticker
 from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.fx import BASE_CURRENCIES, convert_prices, fx_ticker, major_currency
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
+from stockapp.providers.yfinance_provider import YFinanceProvider
 from stockapp.repository import load_actions, load_bars, load_currency
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
@@ -21,6 +38,9 @@ SURVIVORSHIP_NOTE = (
 )
 HISTORY_OPTIONS: dict[str, int | None] = {"5y": 5, "10y": 10, "20y": 20, "max": None}
 BOOTSTRAP_METHODS = {"Gaussian", "Shrunk"}
+BENCHMARKS = ["SPY", "QQQ", "IWM", "DIA", "Other"]
+MIN_REGIME_DAYS = 60
+MIN_FACTOR_DAYS = 60
 
 # Short in-memory layer over the SQLite cache (stockapp.repository); slider changes only slice the cached data.
 fetch_rf_cached = st.cache_data(ttl=300, show_spinner="Loading risk-free rate...")(fetch_rf_annual_pct)
@@ -44,6 +64,72 @@ def load_actions_cached(ticker: str) -> pd.DataFrame:
 def load_fx(pair: str, years: int | None) -> pd.Series:
     """FX closes for a yfinance pair such as GBPUSD=X."""
     return load_bars(pair, years)["close"]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_in_base(ticker: str, years: int | None, base: str) -> pd.Series:
+    """A comparison ticker's adjusted closes converted to the base currency (raises if prices or FX are missing)."""
+    native, currency = load_close(ticker, years)
+    major_ccy, minor_divisor = major_currency(currency or base)
+    rate = load_fx(fx_ticker(major_ccy, base), years) if major_ccy != base else None
+    return convert_prices(native, minor_divisor, rate)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def sector_cached(ticker: str) -> str | None:
+    """yfinance sector for a ticker, cached for a day."""
+    return YFinanceProvider().get_sector(ticker)
+
+
+@st.cache_data(ttl=86400, show_spinner="Loading factor data...")
+def factors_cached() -> pd.DataFrame:
+    """Fama-French 5 + momentum factors (SQLite cache, refreshed weekly)."""
+    return factors.load_factors()
+
+
+# Analytics caches are keyed on (ticker, last bar date, settings key, params); data arguments start with "_" so
+# Streamlit does not hash them.
+@st.cache_data(show_spinner=False)
+def risk_cached(
+    ticker: str, last_date: str, key: str, ppy: float, _r: pd.Series, _close: pd.Series, _rf: pd.Series
+) -> risk.RiskSummary:
+    return risk.summarize(_r, _close, _rf, ppy)
+
+
+@st.cache_data(show_spinner="Fitting GARCH(1,1)...")
+def garch_cached(ticker: str, last_date: str, key: str, ppy: float, _r: pd.Series) -> risk.GarchForecast | None:
+    try:
+        return risk.garch_vol_forecast(_r, periods_per_year=ppy)
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def distribution_cached(ticker: str, last_date: str, key: str, _r: pd.Series) -> distribution.DistributionSummary:
+    return distribution.summarize(_r)
+
+
+@st.cache_data(show_spinner=False)
+def regimes_cached(
+    ticker: str, last_date: str, key: str, prior: float, _r: pd.Series, _rf: pd.Series
+) -> tuple[pd.Series, pd.DataFrame]:
+    labels = regimes.vol_regimes(_r)
+    return labels, regimes.kelly_by_regime(_r, _rf, labels, prior)
+
+
+@st.cache_data(show_spinner="Fitting HMM...")
+def hmm_cached(ticker: str, last_date: str, key: str, n_states: int, _r: pd.Series) -> pd.Series | None:
+    try:
+        return regimes.hmm_regimes(_r, n_states)
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def factor_fit_cached(
+    ticker: str, last_date: str, key: str, factors_through: str, _r: pd.Series, _factors: pd.DataFrame
+) -> factors.FactorFit:
+    return factors.factor_regression(factors.stock_excess_returns(_r, _factors), _factors)
 
 
 @st.cache_data(show_spinner=False)
@@ -71,6 +157,12 @@ with col_left:
     )
     history_label = st.selectbox("History", list(HISTORY_OPTIONS), index=list(HISTORY_OPTIONS).index("10y"))
     base_currency = st.selectbox("Base currency", BASE_CURRENCIES, index=BASE_CURRENCIES.index("USD"))
+    benchmark_choice = st.selectbox("Benchmark", BENCHMARKS, index=0)
+    raw_benchmark = (
+        st.text_input("Benchmark ticker", value="SPY", placeholder="e.g., VT, EFA, ^GSPC")
+        if benchmark_choice == "Other"
+        else benchmark_choice
+    )
     lookback_slot = st.empty()  # filled once the available history is known
     k_fraction = st.slider("Kelly fraction multiplier", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
     prior_sd_annual = st.number_input(
@@ -194,14 +286,223 @@ gauss_band, shrunk_band = bootstrap_bands(excess, prior_sd_annual)
 method_bands = {"Gaussian": gauss_band, "Shrunk": shrunk_band}
 applied_f = applied(raws[method])
 
+# Analytics inputs. Risk and distribution use the lookback window (as Kelly does); regimes, factors, relative strength
+# and seasonality use the full loaded history because they need long samples.
+r_look = returns_df["simple_return"]
+r_all = returns_all["simple_return"]
+last_date = str(close_all.index[-1].date())
+settings_key = f"{base_currency}|{history_label}|{lookback}|{manual_rf_pct if manual_rf_pct is not None else 'irx'}"
+years = HISTORY_OPTIONS[history_label]
+
+benchmark = normalize_ticker(raw_benchmark or "")
+benchmark_close: pd.Series | None = None
+benchmark_problem = ""
+if benchmark is None:
+    benchmark_problem = "Invalid benchmark ticker. Use letters, digits, and . ^ = - only (max 15 characters)."
+elif benchmark == ticker:
+    benchmark_problem = f"The benchmark is {ticker} itself; choose a different benchmark."
+else:
+    try:
+        benchmark_close = load_in_base(benchmark, years, base_currency)
+    except Exception as e:
+        benchmark_problem = f"Could not load benchmark {benchmark}: {e}"
+
 # Charts
 st.subheader("Charts")
-p1, p2 = st.tabs(["Price", "Returns"])
-with p1:
+tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative = st.tabs(
+    ["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative"]
+)
+with tab_price:
     st.plotly_chart(price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""))
-with p2:
+    st.caption("How to read this: the line is the adjusted close; dashed lines mark splits and dots mark dividends.")
+with tab_returns:
     st.plotly_chart(returns_histogram(returns_df))
+    st.caption("How to read this: each bar counts days whose return fell in that range; wide tails mean big days.")
     st.plotly_chart(cumulative_return_chart(returns_df))
+    st.caption("How to read this: the value of $1 invested at the start of the lookback window.")
+
+with tab_risk:
+    st.caption(f"Computed over the {len(r_look)}-day lookback window, in {price_currency}.")
+    rk = risk_cached(ticker, last_date, settings_key, periods_per_year, r_look, close, rf_df)
+    dd = rk.drawdown
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("1-day VaR 95% (historical)", f"{rk.historical_var:.2%}")
+    c2.metric("1-day CVaR 95% (historical)", f"{rk.historical_cvar:.2%}")
+    c3.metric("1-day VaR 95% (normal)", f"{rk.parametric_var:.2%}")
+    c4.metric("Max drawdown", f"{-dd.depth:.1%}")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Sortino", f"{rk.sortino:.2f}")
+    c6.metric("Calmar", f"{rk.calmar:.2f}")
+    c7.metric("Omega (threshold 0)", f"{rk.omega:.2f}")
+    if benchmark_close is not None:
+        fit = risk.beta_r2(r_look, benchmark_close.pct_change().dropna(), periods_per_year)
+        c8.metric(f"Beta vs {benchmark}", f"{fit.beta:.2f}", f"R² {fit.r2:.2f}, alpha {fit.alpha_annual:.1%}/yr")
+    else:
+        c8.metric("Beta", "—")
+        st.info(f"{benchmark_problem} Beta is unavailable.")
+    recovery = dd.recovery_date.date() if dd.recovery_date is not None else "not yet recovered"
+    st.caption(
+        f"VaR/CVaR are losses: on 1 day in 20 expect to lose at least the VaR; CVaR is the average loss on those days. "
+        f"Max drawdown: peak {dd.peak_date.date()}, trough {dd.trough_date.date()}, recovery {recovery} "
+        f"({dd.duration_days} calendar days)."
+    )
+    garch = garch_cached(ticker, last_date, settings_key, periods_per_year, r_look)
+    ewma_now = float(rk.ewma_vol.iloc[-1])
+    if garch is not None and garch.converged:
+        st.metric(
+            "Forecast volatility, next 21 days (GARCH(1,1))", f"{garch.annualized_vol:.1%}", f"EWMA now {ewma_now:.1%}"
+        )
+    else:
+        st.metric("Forward volatility (EWMA, λ = 0.94)", f"{ewma_now:.1%}")
+        st.caption("GARCH(1,1) did not converge on this window, so EWMA is used as the forward estimate.")
+    st.plotly_chart(volatility_chart(rk.rolling_vol, rk.ewma_vol))
+    st.caption("How to read this: higher lines mean bigger daily swings; EWMA reacts faster to recent shocks.")
+    st.plotly_chart(underwater_chart(close))
+    st.caption("How to read this: how far the price sat below its previous high; 0% means at a new high.")
+
+with tab_dist:
+    st.caption(f"Computed over the {len(r_look)}-day lookback window.")
+    dist = distribution_cached(ticker, last_date, settings_key, r_look)
+    verdict = dist.verdict
+    st.markdown("**Is Gaussian Kelly safe for this stock?**")
+    gap = raws["Log-optimal"] - raws["Gaussian"]
+    gap_text = (
+        f" Log-optimal Kelly is {raws['Log-optimal']:.2f} vs Gaussian {raws['Gaussian']:.2f} (gap {gap:+.2f}); "
+        "a large negative gap is the fat-tail penalty."
+    )
+    (st.warning if (verdict.fat_tails or verdict.non_normal or verdict.volatility_clustering) else st.success)(
+        verdict.message + gap_text
+    )
+    jb_stat, jb_p = dist.jarque_bera
+    lb_q, lb_p = dist.ljung_box
+    lb2_q, lb2_p = dist.ljung_box_squared
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric("Skewness", f"{dist.skewness:.2f}")
+    d2.metric("Excess kurtosis", f"{verdict.excess_kurtosis:.2f}")
+    d3.metric("Jarque–Bera p", f"{jb_p:.3g}", f"JB {jb_stat:.0f}")
+    d4.metric("Ljung–Box(10) p, returns", f"{lb_p:.3g}", f"Q {lb_q:.1f}")
+    d5.metric("Ljung–Box(10) p, squared", f"{lb2_p:.3g}", f"Q {lb2_q:.1f}")
+    st.metric("Hurst exponent (indicative; noisy on short samples)", f"{dist.hurst:.2f}")
+    st.caption("Hurst ≈ 0.5 is a random walk, > 0.5 trending, < 0.5 mean-reverting; R/S is biased up on short samples.")
+    q1, q2 = st.columns(2)
+    with q1:
+        st.plotly_chart(qq_chart(dist.qq_normal, "Q-Q vs Normal (standardized)"))
+    with q2:
+        st.plotly_chart(qq_chart(dist.qq_t, f"Q-Q vs Student-t (fitted df {dist.t_fit.df:.1f})"))
+    st.caption(
+        "How to read this: points on the dashed line mean the model fits; ends bending away from it mean the real "
+        "tails are fatter than the model's."
+    )
+    st.plotly_chart(acf_chart(dist.acf, dist.acf_squared, dist.acf_band))
+    st.caption(
+        "How to read this: bars outside the dashed ±1.96/√n lines are significant; tall squared-return bars mean "
+        "volatility clusters."
+    )
+
+with tab_regimes:
+    st.caption(f"Computed over the full {history_label} history ({len(r_all)} days).")
+    labels, regime_kelly = regimes_cached(ticker, last_date, settings_key, prior_sd_annual, r_all, rf_all)
+    if labels.dropna().empty:
+        st.info(
+            f"Not enough history for volatility regimes: they need {regimes.VOL_WINDOW + regimes.MIN_HISTORY} trading "
+            "days. Choose a longer History."
+        )
+    else:
+        current = labels.dropna().iloc[-1]
+        st.metric("Current volatility regime", str(current))
+        st.plotly_chart(regime_chart(close_all.loc[labels.index], labels, "Price by Volatility Regime"))
+        st.caption(
+            "How to read this: shading shows each day's 21-day volatility against all earlier days (bottom third = "
+            "low, top third = high). Labels use no future data."
+        )
+        st.dataframe(
+            regime_kelly.rename(columns={"days": "Days", "gaussian_kelly": "Gaussian f*", "shrunk_kelly": "Shrunk f*"})
+        )
+        thin = regime_kelly.index[regime_kelly["days"] < MIN_REGIME_DAYS].tolist()
+        if thin:
+            st.warning(
+                f"Fewer than {MIN_REGIME_DAYS} days in: {', '.join(thin)}. Those Kelly estimates are unreliable."
+            )
+        st.caption("Raw (unclamped) Kelly using only the days in each regime; excess over the T-bill rate.")
+    if st.toggle("Show HMM regimes (historical view, uses full sample)"):
+        n_states = st.radio("HMM states", [2, 3], horizontal=True)
+        hmm_labels = hmm_cached(ticker, last_date, settings_key, int(n_states), r_all)
+        if hmm_labels is None:
+            st.info("The HMM could not be fitted on this history.")
+        else:
+            st.plotly_chart(
+                regime_chart(
+                    close_all.loc[hmm_labels.index], hmm_labels, "HMM Regimes — historical view (uses full sample)"
+                )
+            )
+            st.caption(
+                "Historical view (uses full sample): each label is decoded with knowledge of later data, so it looks "
+                "ahead. It is for context only and is never used for sizing or signals."
+            )
+
+with tab_factors:
+    st.caption("US Fama–French 5 factors + momentum. The regression is less meaningful for non-US tickers.")
+    try:
+        factor_data = factors_cached()
+    except Exception as e:
+        factor_data = None
+        st.info(f"Factor data is unavailable right now ({e}).")
+    if factor_data is not None:
+        through = str(factor_data.index[-1].date())
+        st.caption(f"Factor data through {through} (the library lags by several weeks).")
+        overlap = factors.stock_excess_returns(r_all, factor_data)
+        if len(overlap) < MIN_FACTOR_DAYS:
+            st.info(f"Only {len(overlap)} days overlap the factor data; at least {MIN_FACTOR_DAYS} are needed.")
+        else:
+            ffit = factor_fit_cached(ticker, last_date, settings_key, through, r_all, factor_data)
+            if calendar_code(ticker) != "XNYS":
+                st.info("This is not a US listing: US factors explain non-US stocks poorly, so read the fit loosely.")
+            st.markdown(f"**{factors.describe_fit(ffit)}**")
+            f1, f2, f3 = st.columns(3)
+            f1.metric("R²", f"{ffit.r2:.2f}")
+            f2.metric(
+                "Alpha (annualized)", f"{ffit.coefs['alpha'] * periods_per_year:.1%}", f"t {ffit.t_stats['alpha']:.1f}"
+            )
+            f3.metric("Days in regression", f"{ffit.n_obs}")
+            loadings = ffit.coefs.drop("alpha")
+            st.plotly_chart(factor_chart(loadings, ffit.std_errors.drop("alpha"), factors.FACTOR_LABELS))
+            st.caption(
+                "How to read this: a bar is the stock's sensitivity to that factor; if its ±2 SE bar crosses zero the "
+                "loading is not statistically significant (Newey–West standard errors)."
+            )
+
+with tab_relative:
+    st.caption(f"Over the full {history_label} history, in {price_currency}.")
+    if benchmark_close is None:
+        st.info(f"{benchmark_problem} Relative performance is unavailable.")
+    else:
+        try:
+            sector = sector_cached(ticker)
+        except Exception:
+            sector = None
+        etf = relative.sector_etf(sector)
+        comparisons: dict[str, pd.Series] = {str(benchmark): benchmark_close}
+        if etf is not None and etf not in (ticker, benchmark):
+            try:
+                comparisons[etf] = load_in_base(etf, years, base_currency)
+            except Exception:
+                st.info(f"Could not load sector ETF {etf}; showing the benchmark only.")
+        if etf is None:
+            st.caption(f"No sector comparison: yfinance reports no mapped sector for {ticker} ({sector or 'none'}).")
+        else:
+            st.caption(f"Sector: {sector} → {etf}.")
+        st.plotly_chart(growth_chart(relative.growth_of_one({ticker: close_all, **comparisons})))
+        st.caption("How to read this: what $1 grew to in each, from the first date they all have prices.")
+        table = relative.relative_table(close_all, comparisons).rename(columns={"stock": ticker})
+        st.dataframe(table.style.format("{:.1%}"))
+        st.caption("Trailing returns over 1, 3, 6 and 12 months (21/63/126/252 trading days) and the stock's excess.")
+        st.plotly_chart(relative_chart(relative.rolling_relative(close_all, benchmark_close), str(benchmark)))
+        st.caption(f"How to read this: above zero, {ticker} beat {benchmark} over that trailing window.")
+    st.markdown("**Seasonality**")
+    monthly = seasonality.monthly_returns(close_all)
+    st.plotly_chart(seasonality_heatmap(monthly))
+    st.plotly_chart(month_average_chart(seasonality.average_by_month(monthly)))
+    st.caption("Seasonal patterns in single stocks are mostly noise; shown for context.")
 
 # Kelly breakdown
 st.subheader("Kelly Breakdown")
