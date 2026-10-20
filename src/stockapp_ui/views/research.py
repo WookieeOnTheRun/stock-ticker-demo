@@ -26,6 +26,7 @@ from stockapp.charts import (
 )
 from stockapp.kelly import excess_returns
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
+from stockapp.report import ReportData, ReportTable, build_report
 from stockapp_ui import cache
 from stockapp_ui.cache import (
     bootstrap_bands,
@@ -396,3 +397,55 @@ def render() -> None:
     st.dataframe(export_df.tail(20))
     csv = export_df.to_csv().encode("utf-8")
     st.download_button("Download returns CSV", data=csv, file_name=f"{ticker}_returns.csv", mime="text/csv")
+
+    st.subheader("Research report")
+
+    def report_html() -> str:
+        """Built only when the button is clicked (download_button accepts a callable)."""
+        rk_report = risk_cached(ticker, last_date, settings_key, periods_per_year, r_look, close, rf_df)
+        dd = rk_report.drawdown
+        risk_rows = [
+            ["1-day VaR 95% (historical)", f"{rk_report.historical_var:.2%}"],
+            ["1-day CVaR 95% (historical)", f"{rk_report.historical_cvar:.2%}"],
+            ["Max drawdown", f"{-dd.depth:.1%} ({dd.peak_date.date()} to {dd.trough_date.date()})"],
+            ["Sortino", f"{rk_report.sortino:.2f}"],
+            ["Calmar", f"{rk_report.calmar:.2f}"],
+            ["CAGR (lookback)", f"{cagr(close, periods_per_year):.1%}"],
+            ["Annualized volatility (lookback)", f"{annualized_volatility(r_look, periods_per_year):.1%}"],
+            ["Sharpe ratio (excess)", f"{sharpe_ratio(excess, periods_per_year):.2f}"],
+        ]
+        kelly_table = comparison.reset_index()
+        data = ReportData(
+            ticker=ticker,
+            data_through=last_date,
+            currency=price_currency,
+            tables=[
+                ReportTable(
+                    f"Kelly comparison (lookback {len(returns_df)} days, fraction {k_fraction_key:g})",
+                    [str(c) for c in kelly_table.columns],
+                    [[str(v) for v in row] for row in kelly_table.itertuples(index=False)],
+                ),
+                ReportTable("Key risk metrics", ["Metric", "Value"], risk_rows),
+                ReportTable(
+                    "Fundamentals",
+                    [],
+                    [],
+                    note="Not available: the fundamentals data source (Tier 4) is not installed.",
+                ),
+            ],
+            figures={
+                "Price": price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""),
+                "Cumulative returns": cumulative_return_chart(returns_df),
+                "Drawdown from peak": underwater_chart(close),
+            },
+        )
+        return build_report(data)
+
+    st.download_button(
+        "Download research report (HTML)",
+        data=report_html,
+        file_name=f"{ticker}_report.html",
+        mime="text/html",
+        on_click="ignore",
+    )
+    st.caption("A self-contained HTML file that works offline. For a PDF, open it in a browser and print to PDF.")
