@@ -107,6 +107,8 @@ librt==0.16.0
     # via mypy
 license-expression==30.4.4
     # via cyclonedx-python-lib
+lightgbm==4.7.0
+    # via stockapp (pyproject.toml)
 lxml==6.1.3
     # via yfinance
 markdown-it-py==4.2.0
@@ -127,6 +129,7 @@ narwhals==2.27.1
     # via
     #   altair
     #   formulaic
+    #   lightgbm
     #   plotly
     #   scikit-learn
 nodeenv==1.11.0
@@ -140,6 +143,7 @@ numpy==2.5.4
     #   formulaic
     #   highspy
     #   hmmlearn
+    #   lightgbm
     #   numpy-typing-compat
     #   optype
     #   osqp
@@ -283,6 +287,7 @@ scipy==1.18.1
     #   cvxpy
     #   formulaic
     #   hmmlearn
+    #   lightgbm
     #   osqp
     #   qdldl
     #   scikit-learn
