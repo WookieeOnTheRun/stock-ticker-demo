@@ -25,22 +25,35 @@ def test_compute_returns():
     np.testing.assert_allclose(returns["log_return"], np.log([1.1, 0.9]))
 
 
+class _FakeTicker:
+    """Stands in for yf.Ticker: history() returns a canned frame, as the yfinance provider calls it."""
+
+    def __init__(self, frame):
+        self.frame = frame
+        self.history_metadata = {"currency": "USD"}
+
+    def history(self, **kwargs):
+        return self.frame
+
+
 def test_fetch_price_history_empty_raises(monkeypatch):
-    monkeypatch.setattr(yf, "download", lambda *args, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(yf, "Ticker", lambda ticker: _FakeTicker(pd.DataFrame()))
     with pytest.raises(LookupError):
         fetch_price_history("MSFT")
 
 
 def test_fetch_price_history_cleans_frame(monkeypatch):
-    # Shape mirrors yf.download(..., multi_level_index=False): OHLC float columns plus int Volume.
+    # Shape mirrors yf.Ticker.history(auto_adjust=False): OHLC float columns, Adj Close, int Volume.
     # Shuffled rows, an unnamed index, a NaN close and int closes exercise the cleanup steps.
     close = make_prices(10, mu=0.0005, sigma=0.01, seed=1).round().astype("int64")
-    frame = pd.DataFrame({"Close": close, "High": close + 1, "Low": close - 1, "Open": close, "Volume": 1_000})
-    frame = frame.astype({"Close": "float64"})
+    frame = pd.DataFrame(
+        {"Close": close, "Adj Close": close, "High": close + 1, "Low": close - 1, "Open": close, "Volume": 1_000}
+    )
+    frame = frame.astype({"Close": "float64", "Adj Close": "float64"})
     frame.iloc[3, frame.columns.get_loc("Close")] = np.nan
     frame = frame.sample(frac=1, random_state=0)
     frame.index.name = None
-    monkeypatch.setattr(yf, "download", lambda *args, **kwargs: frame)
+    monkeypatch.setattr(yf, "Ticker", lambda ticker: _FakeTicker(frame))
 
     result = fetch_price_history("MSFT")
 

@@ -13,9 +13,9 @@ WINDOW_SIZES = [60, 120, 252, 504]
 METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]
 BOOTSTRAP_METHODS = {"Gaussian", "Shrunk"}
 
-# Fetch once per ticker per hour; slider changes only slice the cached data.
-fetch_cached = st.cache_data(ttl=3600, show_spinner="Fetching price history...")(fetch_price_history)
-fetch_rf_cached = st.cache_data(ttl=3600, show_spinner="Fetching risk-free rate...")(fetch_rf_annual_pct)
+# Short in-memory layer over the SQLite cache (stockapp.repository); slider changes only slice the cached data.
+fetch_cached = st.cache_data(ttl=300, show_spinner="Loading price history...")(fetch_price_history)
+fetch_rf_cached = st.cache_data(ttl=300, show_spinner="Loading risk-free rate...")(fetch_rf_annual_pct)
 log_optimal_cached = st.cache_data(show_spinner=False)(log_optimal_kelly)
 drawdown_kelly_cached = st.cache_data(show_spinner=False)(drawdown_constrained_kelly)
 

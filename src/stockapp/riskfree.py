@@ -9,8 +9,8 @@ FFILL_LIMIT = 5  # max consecutive missing rf days carried forward (about one tr
 
 def fetch_rf_annual_pct() -> pd.Series:
     """
-    Fetch the 13-week US T-bill yield (^IRX) for the last HISTORY_PERIOD, in annualized percent.
-    Uses the same yfinance call as fetch_price_history; raises DataFetchError if nothing comes back.
+    Fetch the 13-week US T-bill yield (^IRX) for the last 10 years, in annualized percent.
+    Uses the same cached data layer as fetch_price_history; raises TickerNotFound if nothing comes back.
     """
     return fetch_price_history(RF_TICKER)
 
