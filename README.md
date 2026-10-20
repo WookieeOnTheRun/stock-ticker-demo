@@ -102,4 +102,5 @@ Shrinkage matters because the daily mean is very noisy: its standard error `σ/�
 - Annualized growth at the applied fraction uses the second-order approximation `g(f) ≈ 252·[mean(rf) + f·mean(e) − f²σ²/2]`.
 - Five years of adjusted daily closes are fetched once per ticker and cached in memory for one hour; the lookback slider (in trading days) slices the cached data.
 - The "Kelly across windows" chart uses fixed windows (60/120/252/504 trading days) of the full history, independent of the lookback slider.
+- Survivorship bias: analyses use currently listed tickers; delisted companies are absent, which biases historical comparisons upward.
 - This is for educational purposes and not financial advice.

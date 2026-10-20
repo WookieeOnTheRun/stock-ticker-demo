@@ -11,11 +11,14 @@ from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.fx import BASE_CURRENCIES, convert_prices, fx_ticker, major_currency
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
-from stockapp.repository import load_bars, load_currency
+from stockapp.repository import load_actions, load_bars, load_currency
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
 METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]
+SURVIVORSHIP_NOTE = (
+    "Analyses use currently listed tickers; delisted companies are absent, which biases historical comparisons upward."
+)
 HISTORY_OPTIONS: dict[str, int | None] = {"5y": 5, "10y": 10, "20y": 20, "max": None}
 BOOTSTRAP_METHODS = {"Gaussian", "Shrunk"}
 
@@ -29,6 +32,12 @@ drawdown_kelly_cached = st.cache_data(show_spinner=False)(drawdown_constrained_k
 def load_close(ticker: str, years: int | None) -> tuple[pd.Series, str | None]:
     """Adjusted closes named "Close" for the last `years` years (None = all available), and the quote currency."""
     return load_bars(ticker, years)["adj_close"].rename("Close"), load_currency(ticker)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_actions_cached(ticker: str) -> pd.DataFrame:
+    """Cached splits and dividends for a ticker already loaded with load_bars."""
+    return load_actions(ticker)
 
 
 @st.cache_data(ttl=300, show_spinner="Loading FX rates...")
@@ -54,7 +63,12 @@ st.title("📈 Fractional Kelly Stock Analyzer")
 col_left, col_right = st.columns([3, 2])
 
 with col_left:
-    raw_ticker = st.text_input("Ticker", value="MSFT", placeholder="e.g., AAPL, MSFT, SPY")
+    raw_ticker = st.text_input(
+        "Ticker",
+        value="MSFT",
+        placeholder="e.g., AAPL, MSFT, SPY, VOD.L",
+        help=SURVIVORSHIP_NOTE,
+    )
     history_label = st.selectbox("History", list(HISTORY_OPTIONS), index=list(HISTORY_OPTIONS).index("10y"))
     base_currency = st.selectbox("Base currency", BASE_CURRENCIES, index=BASE_CURRENCIES.index("USD"))
     lookback_slot = st.empty()  # filled once the available history is known
@@ -184,7 +198,7 @@ applied_f = applied(raws[method])
 st.subheader("Charts")
 p1, p2 = st.tabs(["Price", "Returns"])
 with p1:
-    st.plotly_chart(price_chart(close))
+    st.plotly_chart(price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""))
 with p2:
     st.plotly_chart(returns_histogram(returns_df))
     st.plotly_chart(cumulative_return_chart(returns_df))
