@@ -422,8 +422,7 @@ with tab_stock:
         recovery = dd.recovery_date.date() if dd.recovery_date is not None else "not yet recovered"
         st.caption(
             "VaR/CVaR are losses: on 1 day in 20 expect to lose at least the VaR; CVaR is the average loss on those "
-            "days. "
-            f"Max drawdown: peak {dd.peak_date.date()}, trough {dd.trough_date.date()}, recovery {recovery} "
+            f"days. Max drawdown: peak {dd.peak_date.date()}, trough {dd.trough_date.date()}, recovery {recovery} "
             f"({dd.duration_days} calendar days)."
         )
         garch = garch_cached(ticker, last_date, settings_key, periods_per_year, r_look)
@@ -489,8 +488,7 @@ with tab_stock:
         if labels.dropna().empty:
             st.info(
                 f"Not enough history for volatility regimes: they need {regimes.VOL_WINDOW + regimes.MIN_HISTORY} "
-                "trading "
-                "days. Choose a longer History."
+                "trading days. Choose a longer History."
             )
         else:
             current = labels.dropna().iloc[-1]
@@ -524,8 +522,7 @@ with tab_stock:
                 )
                 st.caption(
                     "Historical view (uses full sample): each label is decoded with knowledge of later data, so it "
-                    "looks "
-                    "ahead. It is for context only and is never used for sizing or signals."
+                    "looks ahead. It is for context only and is never used for sizing or signals."
                 )
 
     with tab_factors:
@@ -756,8 +753,7 @@ with tab_stock:
                 trials = 1 + bh.trials + kbh.trials
                 st.warning(
                     "Fixed parameters are not out-of-sample: they may have been chosen with hindsight, and any "
-                    "estimated "
-                    "quantity (such as a Kelly fraction) is fitted on the same period it is evaluated on."
+                    "estimated quantity (such as a Kelly fraction) is fitted on the same period it is evaluated on."
                 )
             columns["Buy & hold — out-of-sample span"] = bh.out_of_sample.metrics
             columns["Kelly buy & hold — out-of-sample"] = kbh.out_of_sample.metrics
@@ -768,8 +764,7 @@ with tab_stock:
             st.plotly_chart(growth_chart(equity))
             st.caption(
                 f"How to read this: growth of $1 from {span_start.date()}, the first out-of-sample decision; every "
-                "line "
-                "starts on the same day so they can be compared directly."
+                "line starts on the same day so they can be compared directly."
             )
             st.metric("Trials (parameter combinations evaluated)", trials)
             st.caption(TRIALS_CAPTION)

@@ -226,8 +226,7 @@ def _render_analysis(
     if analysis.bands.reduced:
         st.info(
             f"Bootstrap reduced to {analysis.bands.resamples} of {analysis.bands.requested} resamples to stay within "
-            "the "
-            "time budget for this many tickers; the bands are a little noisier."
+            "the time budget for this many tickers; the bands are a little noisier."
         )
     if analysis.bands.fallbacks:
         st.caption(f"{analysis.bands.fallbacks} resamples hit the optimizer fallback (equal weight).")
