@@ -1,13 +1,16 @@
+import pandas as pd
 import streamlit as st
 
 from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
 from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
 from stockapp.kelly import fractional_kelly
+from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
 
 # Fetch once per ticker per hour; slider changes only slice the cached data.
 fetch_cached = st.cache_data(ttl=3600, show_spinner="Fetching price history...")(fetch_price_history)
+fetch_rf_cached = st.cache_data(ttl=3600, show_spinner="Fetching risk-free rate...")(fetch_rf_annual_pct)
 
 st.set_page_config(page_title="Fractional Kelly Analyzer", layout="wide")
 
@@ -20,6 +23,22 @@ with col_left:
     lookback = st.slider("Lookback window (trading days)", min_value=60, max_value=1000, value=252, step=10)
     k_fraction = st.slider("Kelly fraction multiplier", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
     st.caption("Data source: yfinance (adjusted close). No API key required.")
+    st.caption("Risk-free: 13-week US T-bill (USD). Non-USD tickers should use a local rate (not yet supported).")
+
+try:
+    rf_annual_pct: pd.Series | None = fetch_rf_cached()
+except Exception:
+    rf_annual_pct = None
+
+manual_rf_pct: float | None = None
+if rf_annual_pct is None:
+    with col_left:
+        st.warning("Couldn't fetch the T-bill rate. Enter a risk-free rate below; a manual rate is in use.")
+        manual_rf_pct = st.number_input(
+            "Annual risk-free rate (%)", min_value=0.0, max_value=20.0, value=None, step=0.1, format="%.2f"
+        )
+    if manual_rf_pct is None:
+        st.stop()
 
 if not raw_ticker.strip():
     st.stop()
@@ -36,6 +55,11 @@ except Exception as e:
     st.stop()
 
 returns_all = compute_returns(close_all)
+if rf_annual_pct is not None:
+    rf_all = align_rf(daily_rf(rf_annual_pct), returns_all.index)
+else:
+    rf_all = daily_rf(pd.Series(manual_rf_pct, index=returns_all.index))
+returns_all = returns_all.loc[rf_all.index]
 if len(returns_all) < 2:
     st.error(f"Not enough price history for {ticker} to compute returns.")
     st.stop()
