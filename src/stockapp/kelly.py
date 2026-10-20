@@ -20,7 +20,9 @@ def estimate_stats(returns: pd.Series) -> tuple[float, float, float]:
     return float(returns.mean()), float(returns.var()), float(returns.std())
 
 
-def fractional_kelly(returns: pd.Series, k_fraction: float = 0.5, clamp_min: float = 0.0, clamp_max: float = 1.0) -> KellyResult:
+def fractional_kelly(
+    returns: pd.Series, k_fraction: float = 0.5, clamp_min: float = 0.0, clamp_max: float = 1.0
+) -> KellyResult:
     """
     Compute fractional Kelly using mean/variance estimate:
     f* = mu / var; then apply fraction: f = k_fraction * f*

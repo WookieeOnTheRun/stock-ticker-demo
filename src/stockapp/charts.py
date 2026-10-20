@@ -27,5 +27,7 @@ def cumulative_return_chart(returns_df: pd.DataFrame) -> go.Figure:
 def kelly_over_windows_chart(kelly_by_window: dict[int, float]) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Bar(x=list(kelly_by_window), y=list(kelly_by_window.values()), name="Kelly Fraction"))
-    fig.update_layout(title="Kelly Fraction Across Lookback Windows", xaxis_title="Window (trading days)", yaxis_title="Fraction")
+    fig.update_layout(
+        title="Kelly Fraction Across Lookback Windows", xaxis_title="Window (trading days)", yaxis_title="Fraction"
+    )
     return fig

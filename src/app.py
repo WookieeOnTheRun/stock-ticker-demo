@@ -1,7 +1,8 @@
 import streamlit as st
-from stockapp.data import fetch_price_history, compute_returns, normalize_ticker
+
+from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
+from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
 from stockapp.kelly import fractional_kelly
-from stockapp.charts import price_chart, returns_histogram, cumulative_return_chart, kelly_over_windows_chart
 
 WINDOW_SIZES = [60, 120, 252, 504]
 
