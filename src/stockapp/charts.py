@@ -341,3 +341,37 @@ def frontier_chart(frontier: pd.DataFrame, marks: dict[str, tuple[float, float]]
         yaxis_tickformat=".1%",
     )
     return fig
+
+
+def reliability_chart(reliability: pd.DataFrame) -> go.Figure:
+    """Calibration diagram: observed frequency vs mean predicted probability per bin, sized by count."""
+    known = reliability.dropna(subset=["mean_predicted"])
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line={"dash": "dash"}, name="Perfect calibration"))
+    fig.add_trace(
+        go.Scatter(
+            x=known["mean_predicted"],
+            y=known["observed"],
+            mode="markers+lines",
+            marker={"size": [6 + 24 * (c / max(known["count"].max(), 1)) ** 0.5 for c in known["count"]]},
+            text=[f"{b}: {c} predictions" for b, c in zip(known["bin"], known["count"], strict=True)],
+            hoverinfo="text",
+            name="Model",
+        )
+    )
+    fig.update_layout(
+        title="Reliability (out-of-sample)",
+        xaxis_title="Predicted probability",
+        yaxis_title="Observed frequency",
+        xaxis_range=[0, 1],
+        yaxis_range=[0, 1],
+    )
+    return fig
+
+
+def contributions_chart(contributions: pd.Series, top: int = 5) -> go.Figure:
+    """Top features by absolute contribution to the latest prediction's log-odds."""
+    largest = contributions.reindex(contributions.abs().sort_values(ascending=False).index).head(top)[::-1]
+    fig = go.Figure(go.Bar(x=largest.values, y=list(largest.index), orientation="h"))
+    fig.update_layout(title="Top Drivers of the Latest Prediction", xaxis_title="Contribution to log-odds")
+    return fig

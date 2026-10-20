@@ -13,6 +13,7 @@ from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, k
 from stockapp.calendars import calendar_code, is_stale, sessions_per_year
 from stockapp.charts import (
     acf_chart,
+    contributions_chart,
     cumulative_return_chart,
     drawdowns_chart,
     factor_chart,
@@ -23,6 +24,7 @@ from stockapp.charts import (
     qq_chart,
     regime_chart,
     relative_chart,
+    reliability_chart,
     returns_histogram,
     seasonality_heatmap,
     underwater_chart,
@@ -33,6 +35,7 @@ from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.fx import BASE_CURRENCIES, convert_prices, fx_ticker, major_currency
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
+from stockapp.model.probability import ModelReport, walk_forward_model
 from stockapp.providers.yfinance_provider import YFinanceProvider
 from stockapp.repository import load_actions, load_bars, load_currency
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
@@ -167,6 +170,24 @@ def walk_forward_cached(
         mode="rolling" if mode == "rolling" else "expanding",
         periods_per_year=ppy,
     )
+
+
+@st.cache_data(show_spinner="Training walk-forward probability model...")
+def model_cached(
+    ticker: str,
+    last_date: str,
+    key: str,
+    horizon: int,
+    benchmark: str | None,
+    _prices: pd.Series,
+    _rf: pd.Series,
+    _benchmark_prices: pd.Series | None,
+) -> ModelReport | str:
+    """The walk-forward model report, or a message explaining why it could not be built."""
+    try:
+        return walk_forward_model(_prices, _rf, horizon, _benchmark_prices)
+    except ValueError as exc:
+        return str(exc)
 
 
 @st.cache_data(show_spinner=False)
@@ -386,8 +407,8 @@ with tab_stock:
 
     # Charts
     st.subheader("Charts")
-    tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative, tab_backtest = st.tabs(
-        ["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative", "Backtest"]
+    tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative, tab_backtest, tab_model = (
+        st.tabs(["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative", "Backtest", "Model"])
     )
     with tab_price:
         st.plotly_chart(price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""))
@@ -800,3 +821,53 @@ with tab_stock:
             )
             st.metric("Trials across all signals", cards.trials)
             st.caption(TRIALS_CAPTION)
+
+    with tab_model:
+        st.caption(
+            f"Probability that {ticker} beats the T-bill rate over the next H trading days, from LightGBM trained "
+            "walk-forward (each year predicted by a model trained only on earlier data) and calibrated on "
+            "held-out data."
+        )
+        horizon = st.selectbox("Horizon H (trading days)", [21, 5], key="model_horizon")
+        model_prices = close_all.loc[rf_all.index[0] :] if len(rf_all) else close_all
+        model_key = f"{base_currency}|{history_label}|{manual_rf_pct if manual_rf_pct is not None else 'irx'}"
+        report = model_cached(
+            ticker, last_date, model_key, int(horizon), benchmark, model_prices, rf_all, benchmark_close
+        )
+        if isinstance(report, str):
+            st.info(f"The model is unavailable: {report}. Choose a longer History.")
+        else:
+            if report.has_skill:
+                st.success(
+                    f"Out-of-sample Brier {report.metrics['Brier']:.4f} beats climatology "
+                    f"{report.metrics['Brier (climatology)']:.4f}: some demonstrated skill."
+                )
+            else:
+                st.warning(
+                    "Model has no demonstrated skill for this ticker: its out-of-sample Brier score "
+                    f"({report.metrics['Brier']:.4f}) is not better than always predicting the training base rate "
+                    f"({report.metrics['Brier (climatology)']:.4f}). Its probability is treated as 0.5 in the advice."
+                )
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Latest P(beat T-bill)", f"{report.latest_probability:.0%}")
+            m2.metric("AUC (out-of-sample)", f"{report.metrics['AUC']:.3f}")
+            m3.metric(
+                "Log loss",
+                f"{report.metrics['Log loss']:.3f}",
+                f"climatology {report.metrics['Log loss (climatology)']:.3f}",
+                delta_color="off",
+            )
+            m4.metric("Out-of-sample predictions", f"{int(report.metrics['Out-of-sample predictions']):,}")
+            st.metric("Trials (hyperparameter combinations)", report.trials)
+            st.caption(TRIALS_CAPTION)
+            r1, r2 = st.columns(2)
+            with r1:
+                st.plotly_chart(reliability_chart(report.reliability))
+                st.caption(
+                    "How to read this: points on the dashed line are well calibrated; bigger points hold more "
+                    "predictions. Counts per bin are in the table below."
+                )
+            with r2:
+                st.plotly_chart(contributions_chart(report.latest_contributions))
+                st.caption("How to read this: features pushing the latest prediction up (right) or down (left).")
+            st.dataframe(report.reliability.set_index("bin"))
