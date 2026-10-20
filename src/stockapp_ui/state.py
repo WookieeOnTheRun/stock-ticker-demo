@@ -5,11 +5,13 @@ that doesn't render its widget is shown (Streamlit otherwise drops values of wid
 
 import streamlit as st
 
+from stockapp.backtest.strategies import KELLY_METHODS
 from stockapp.fx import BASE_CURRENCIES
+from stockapp.userstore import BENCHMARK_CHOICES
 
 HISTORY_OPTIONS: dict[str, int | None] = {"5y": 5, "10y": 10, "20y": 20, "max": None}
-METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]
-BENCHMARKS = ["SPY", "QQQ", "IWM", "DIA", "Other"]
+METHODS = list(KELLY_METHODS)
+BENCHMARKS = list(BENCHMARK_CHOICES)
 SURVIVORSHIP_NOTE = (
     "Analyses use currently listed tickers; delisted companies are absent, which biases historical comparisons upward."
 )
@@ -74,3 +76,19 @@ def render_sidebar() -> None:
         )
         st.slider("Max tolerable drawdown", min_value=10, max_value=50, step=5, format="%d%%", key="max_dd_pct")
         st.caption("Probability of exceeding it over 1 year ≈ 10%.")
+
+
+def current_settings() -> dict[str, object]:
+    """The shared settings as they are now (the payload a signed-in user can save)."""
+    return {key: st.session_state[key] for key in DEFAULTS}
+
+
+def apply_settings(settings: dict[str, object]) -> None:
+    """Overwrite shared settings; call from a widget callback so it runs before the sidebar widgets render."""
+    for key, value in settings.items():
+        if key in DEFAULTS:
+            st.session_state[key] = value
+
+
+def reset_to_defaults() -> None:
+    apply_settings(dict(DEFAULTS))
