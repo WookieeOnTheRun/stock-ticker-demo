@@ -5,6 +5,7 @@ import streamlit as st
 
 import portfolio_tab
 from stockapp import distribution, factors, regimes, relative, risk, seasonality
+from stockapp.backtest.cards import signal_cards
 from stockapp.backtest.engine import DEFAULT_COST_BPS, BacktestResult
 from stockapp.backtest.strategies import BUY_AND_HOLD, Strategy, kelly_buy_and_hold
 from stockapp.backtest.walkforward import TRAIN_YEARS, TRIALS_CAPTION, WalkForwardResult, fixed_params, walk_forward
@@ -781,8 +782,26 @@ with tab_stock:
             st.caption(
                 "In-sample is the final fold's chosen parameters on the training data that chose them; out-of-sample "
                 "stitches each test year, traded with parameters chosen before it. Sharpe and Sortino are on returns "
-                "in "
-                "excess of the T-bill rate."
+                "in excess of the T-bill rate."
             )
             st.plotly_chart(drawdowns_chart(equity))
             st.caption("How to read this: how far each strategy sat below its own previous high.")
+
+            st.markdown("**Signal cards (walk-forward, out-of-sample)**")
+            cards = signal_cards(list(SIGNALS), run_wf, BUY_AND_HOLD.name, "Kelly buy & hold")
+            pct_cols = ["OOS CAGR", "OOS max drawdown", "Exposure", "Buy & hold max DD"]
+            st.dataframe(
+                cards.table.style.format(
+                    {
+                        c: ("{:.1%}" if c in pct_cols else "{:.2f}")
+                        for c in cards.table.columns
+                        if c != "Beats buy-and-hold OOS"
+                    }
+                )
+            )
+            st.caption(
+                "Every registered signal, sorted by out-of-sample Sharpe; none are hidden. 'Beats buy-and-hold OOS' "
+                "compares Sharpe on the same span; check max drawdown too."
+            )
+            st.metric("Trials across all signals", cards.trials)
+            st.caption(TRIALS_CAPTION)
