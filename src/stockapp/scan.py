@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stockapp.advice import BANNER, AdviceInputs, decide, kelly_inputs
+from stockapp.advice import BANNER, AdviceInputs, advice_probability, decide, kelly_inputs
 from stockapp.fx import convert_prices, fx_ticker, major_currency
 from stockapp.model.probability import walk_forward_model
 from stockapp.portfolio_input import MAX_UPLOAD_BYTES, WatchlistError, parse_watchlist_csv
@@ -65,7 +65,7 @@ def scan_ticker(
     rf = align_rf(daily_rf(rf_annual_pct), pd.DatetimeIndex(prices.index))
     prices = prices.loc[rf.index]
     report = walk_forward_model(prices, rf, horizon)
-    p = report.latest_probability if report.has_skill else 0.5
+    p = advice_probability(report)
     kelly = kelly_inputs(prices.iloc[-(lookback + 1) :], rf, k_fraction, prior_sd_annual, max_dd)
     regimes = vol_regimes(prices.pct_change()).dropna()
     regime = str(regimes.iloc[-1]) if len(regimes) else None

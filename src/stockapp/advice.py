@@ -13,6 +13,7 @@ from stockapp.backtest.strategies import Params, Strategy
 from stockapp.bootstrap import block_bootstrap_indices, kelly_band, kelly_distribution
 from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.kelly import excess_returns, shrunk_kelly
+from stockapp.model.probability import ModelReport
 from stockapp.regimes import vol_regimes
 
 P_BUY = 0.55
@@ -21,6 +22,11 @@ TRIM_TOLERANCE = 0.05
 NO_SKILL_P = 0.5
 MIN_SCORED_FOR_SKILL = 252  # out-of-sample predictions with known outcomes before skill can be established
 BANNER = "Educational tool. Not investment advice. Past performance does not predict future results."
+
+
+def advice_probability(report: ModelReport) -> float:
+    """The probability the rules act on: the model's latest calibrated p if it has out-of-sample skill, else 0.5."""
+    return report.latest_probability if report.has_skill else NO_SKILL_P
 
 
 @dataclass(frozen=True)

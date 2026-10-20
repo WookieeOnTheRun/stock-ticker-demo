@@ -5,7 +5,15 @@ import streamlit as st
 
 import portfolio_tab
 from stockapp import distribution, factors, regimes, relative, risk, seasonality
-from stockapp.advice import BANNER, AdviceInputs, causal_skill_gate, decide, fan_chart_paths, rule_strategy
+from stockapp.advice import (
+    BANNER,
+    AdviceInputs,
+    advice_probability,
+    causal_skill_gate,
+    decide,
+    fan_chart_paths,
+    rule_strategy,
+)
 from stockapp.backtest.cards import signal_cards
 from stockapp.backtest.engine import DEFAULT_COST_BPS, BacktestResult
 from stockapp.backtest.strategies import BUY_AND_HOLD, Strategy, kelly_buy_and_hold
@@ -936,7 +944,7 @@ with tab_stock:
         if isinstance(advice_report, str):
             st.info(f"Advice needs the probability model, which is unavailable: {advice_report}.")
         else:
-            p_model = advice_report.latest_probability if advice_report.has_skill else 0.5
+            p_model = advice_probability(advice_report)
             regime_labels, _ = regimes_cached(ticker, last_date, settings_key, prior_sd_annual, r_all, rf_all)
             known_regimes = regime_labels.dropna()
             current_regime = str(known_regimes.iloc[-1]) if len(known_regimes) else None
