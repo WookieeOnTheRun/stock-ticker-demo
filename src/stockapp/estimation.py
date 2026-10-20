@@ -53,20 +53,21 @@ def make_spd(matrix: np.ndarray) -> tuple[np.ndarray, float]:
     raise np.linalg.LinAlgError("Covariance matrix could not be made positive definite")
 
 
-def ledoit_wolf(excess: pd.DataFrame) -> CovarianceEstimate:
+def ledoit_wolf(excess: pd.DataFrame, diagnostics: bool = True) -> CovarianceEstimate:
     """
     Ledoit-Wolf (2004) shrinkage of the sample covariance toward a scaled identity (sklearn LedoitWolf), with the
-    condition number before and after shrinkage, followed by a Cholesky check (make_spd).
+    condition number before and after shrinkage (NaN when diagnostics=False, to save time in bootstrap loops),
+    followed by a Cholesky check (make_spd).
     """
     values = excess.dropna().to_numpy(dtype=float)
     fit = LedoitWolf().fit(values)
-    sample = np.cov(values, rowvar=False, ddof=0)
     sigma, jitter = make_spd(np.asarray(fit.covariance_, dtype=float))
+    nan = float("nan")
     return CovarianceEstimate(
         sigma=sigma,
         shrinkage=float(fit.shrinkage_),
-        condition_sample=float(np.linalg.cond(sample)),
-        condition_shrunk=float(np.linalg.cond(sigma)),
+        condition_sample=float(np.linalg.cond(np.cov(values, rowvar=False, ddof=0))) if diagnostics else nan,
+        condition_shrunk=float(np.linalg.cond(sigma)) if diagnostics else nan,
         jitter=jitter,
     )
 
@@ -83,9 +84,11 @@ class Estimates:
     covariance: CovarianceEstimate
 
 
-def estimate(excess: pd.DataFrame, prior_sd_annual: float, periods_per_year: float) -> Estimates:
+def estimate(
+    excess: pd.DataFrame, prior_sd_annual: float, periods_per_year: float, diagnostics: bool = True
+) -> Estimates:
     """Annualized shrunk means and Ledoit-Wolf covariance (per-period estimates x periods_per_year)."""
-    cov = ledoit_wolf(excess)
+    cov = ledoit_wolf(excess, diagnostics)
     return Estimates(
         tickers=[str(c) for c in excess.columns],
         mu=shrunk_means(excess, prior_sd_annual, periods_per_year).to_numpy(dtype=float) * periods_per_year,
