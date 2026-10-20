@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-import numpy as np
+
 import pandas as pd
 
 
@@ -14,13 +14,10 @@ class KellyResult:
 
 
 def estimate_stats(returns: pd.Series) -> tuple[float, float, float]:
-    """Return (mean, variance, stdev) for a return series."""
-    if returns is None or len(returns) < 2:
+    """Return (mean, sample variance, sample stdev) for a return series."""
+    if len(returns) < 2:
         return 0.0, 0.0, 0.0
-    mu = float(np.mean(returns))
-    var = float(np.var(returns, ddof=1))  # sample variance
-    sd = float(np.sqrt(var))
-    return mu, var, sd
+    return float(returns.mean()), float(returns.var()), float(returns.std())
 
 
 def fractional_kelly(returns: pd.Series, k_fraction: float = 0.5, clamp_min: float = 0.0, clamp_max: float = 1.0) -> KellyResult:
@@ -30,12 +27,7 @@ def fractional_kelly(returns: pd.Series, k_fraction: float = 0.5, clamp_min: flo
     Safety clamps: [clamp_min, clamp_max]. If variance ~ 0, f = 0.
     """
     mu, var, sd = estimate_stats(returns)
-    if var <= 1e-12:
-        raw = 0.0
-    else:
-        raw = mu / var
-    raw = float(raw)
-    frac = float(max(0.0, min(k_fraction, 1.0)))
-    applied = raw * frac
-    applied = max(clamp_min, min(applied, clamp_max))
+    raw = mu / var if var > 1e-12 else 0.0
+    frac = max(0.0, min(k_fraction, 1.0))
+    applied = max(clamp_min, min(raw * frac, clamp_max))
     return KellyResult(mean_return=mu, variance=var, stdev=sd, raw_kelly=raw, fraction=frac, applied_kelly=applied)

@@ -15,7 +15,7 @@ A simple Streamlit app that fetches free market data using `yfinance`, computes 
 
 ```bash
 python -m venv .venv
-.venv\\Scripts\\activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
 
 2. Install dependencies:
@@ -32,7 +32,15 @@ streamlit run src/app.py
 
 Open the provided local URL in your browser.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Notes
 - This app uses historical daily returns to estimate mean/variance; Kelly is sensitive to estimation error—use conservative fractions.
-- No offline caching is implemented; data is fetched on demand.
+- Five years of adjusted daily closes are fetched once per ticker and cached in memory for one hour; the lookback slider (in trading days) slices the cached data.
+- The "Kelly across windows" chart uses fixed windows (60/120/252/504 trading days) of the full history, independent of the lookback slider.
 - This is for educational purposes and not financial advice.
