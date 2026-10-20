@@ -476,10 +476,11 @@ with tab_relative:
     if benchmark_close is None:
         st.info(f"{benchmark_problem} Relative performance is unavailable.")
     else:
+        sector_lookup_failed = False
         try:
             sector = sector_cached(ticker)
         except Exception:
-            sector = None
+            sector, sector_lookup_failed = None, True
         etf = relative.sector_etf(sector)
         comparisons: dict[str, pd.Series] = {str(benchmark): benchmark_close}
         if etf is not None and etf not in (ticker, benchmark):
@@ -487,7 +488,9 @@ with tab_relative:
                 comparisons[etf] = load_in_base(etf, years, base_currency)
             except Exception:
                 st.info(f"Could not load sector ETF {etf}; showing the benchmark only.")
-        if etf is None:
+        if sector_lookup_failed:
+            st.caption("No sector comparison: the sector lookup is unavailable right now (offline or provider error).")
+        elif etf is None:
             st.caption(f"No sector comparison: yfinance reports no mapped sector for {ticker} ({sector or 'none'}).")
         else:
             st.caption(f"Sector: {sector} → {etf}.")
