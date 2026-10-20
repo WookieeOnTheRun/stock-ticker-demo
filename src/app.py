@@ -211,7 +211,9 @@ def portfolio_daily_rf() -> pd.Series | None:
 # The Portfolio tab is rendered first: the Stock tab below may st.stop() on bad input.
 tab_stock, tab_portfolio = st.tabs(["Stock", "Portfolio"])
 with tab_portfolio:
-    portfolio_tab.render(load_in_base, portfolio_daily_rf, HISTORY_OPTIONS[str(st.session_state.get("history", "10y"))])
+    portfolio_tab.render(
+        load_in_base, portfolio_daily_rf, sector_cached, HISTORY_OPTIONS[str(st.session_state.get("history", "10y"))]
+    )
 
 with tab_stock:
     col_left, col_right = st.columns([3, 2])

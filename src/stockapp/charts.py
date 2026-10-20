@@ -265,3 +265,79 @@ def drawdowns_chart(equity: pd.DataFrame) -> go.Figure:
         fig.add_trace(go.Scatter(x=drawdown.index, y=drawdown.values, mode="lines", name=str(column)))
     fig.update_layout(title="Drawdown From Peak", xaxis_title="Date", yaxis_title="Drawdown", yaxis_tickformat=".0%")
     return fig
+
+
+def correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
+    """Correlation matrix heatmap in the given row/column order."""
+    fig = go.Figure(
+        go.Heatmap(
+            z=corr.values,
+            x=list(corr.columns),
+            y=list(corr.index),
+            zmin=-1,
+            zmax=1,
+            colorscale="RdBu",
+            reversescale=True,
+            hovertemplate="%{y} / %{x}: %{z:.2f}<extra></extra>",
+        )
+    )
+    fig.update_layout(title="Correlation (ordered by HRP clusters)", yaxis_autorange="reversed")
+    return fig
+
+
+def dendrogram_chart(link: np.ndarray, labels: list[str]) -> go.Figure:
+    """Single-linkage dendrogram drawn from scipy's dendrogram coordinates (correlation distance on the y axis)."""
+    from scipy.cluster.hierarchy import dendrogram
+
+    tree = dendrogram(link, no_plot=True, labels=labels)
+    fig = go.Figure()
+    for xs, ys in zip(tree["icoord"], tree["dcoord"], strict=True):
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line={"width": 1.5}, hoverinfo="skip", showlegend=False))
+    ticks = [5 + 10 * i for i in range(len(tree["ivl"]))]
+    fig.update_layout(
+        title="Cluster Tree (HRP)",
+        xaxis={"tickvals": ticks, "ticktext": tree["ivl"]},
+        yaxis_title="Distance sqrt(0.5 (1 − ρ))",
+    )
+    return fig
+
+
+def weights_chart(
+    weights: pd.DataFrame,
+    band_low: pd.Series | None = None,
+    band_high: pd.Series | None = None,
+    banded: str | None = None,
+) -> go.Figure:
+    """Grouped weight bars per ticker for each weighting (column); the `banded` column gets 5-95% error bars."""
+    fig = go.Figure()
+    for column in weights.columns:
+        error_y = None
+        if column == banded and band_low is not None and band_high is not None:
+            values = weights[column]
+            error_y = go.bar.ErrorY(
+                type="data",
+                symmetric=False,
+                array=(band_high.reindex(values.index) - values).clip(lower=0).fillna(0).values,
+                arrayminus=(values - band_low.reindex(values.index)).clip(lower=0).fillna(0).values,
+            )
+        fig.add_trace(go.Bar(x=list(weights.index), y=weights[column].values, name=str(column), error_y=error_y))
+    fig.update_layout(title="Weights by Method", barmode="group", yaxis_title="Weight", yaxis_tickformat=".0%")
+    return fig
+
+
+def frontier_chart(frontier: pd.DataFrame, marks: dict[str, tuple[float, float]]) -> go.Figure:
+    """Efficient frontier (annualized volatility vs expected excess return) with named portfolios marked."""
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(x=frontier["volatility"], y=frontier["excess_return"], mode="lines+markers", name="Frontier")
+    )
+    for name, (vol, ret) in marks.items():
+        fig.add_trace(go.Scatter(x=[vol], y=[ret], mode="markers", marker={"size": 12, "symbol": "diamond"}, name=name))
+    fig.update_layout(
+        title="Long-only Efficient Frontier",
+        xaxis_title="Annualized volatility",
+        yaxis_title="Expected excess return (annualized)",
+        xaxis_tickformat=".0%",
+        yaxis_tickformat=".1%",
+    )
+    return fig
