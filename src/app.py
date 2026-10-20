@@ -199,10 +199,19 @@ st.set_page_config(page_title="Fractional Kelly Analyzer", layout="wide")
 
 st.title("📈 Fractional Kelly Stock Analyzer")
 
+
+def portfolio_daily_rf() -> pd.Series | None:
+    """Daily T-bill rate for the Portfolio tab over the Stock tab's History, or None if it can't be fetched."""
+    try:
+        return daily_rf(fetch_rf_cached(HISTORY_OPTIONS[str(st.session_state.get("history", "10y"))]))
+    except Exception:
+        return None
+
+
 # The Portfolio tab is rendered first: the Stock tab below may st.stop() on bad input.
 tab_stock, tab_portfolio = st.tabs(["Stock", "Portfolio"])
 with tab_portfolio:
-    portfolio_tab.render(load_in_base, HISTORY_OPTIONS[str(st.session_state.get("history", "10y"))])
+    portfolio_tab.render(load_in_base, portfolio_daily_rf, HISTORY_OPTIONS[str(st.session_state.get("history", "10y"))])
 
 with tab_stock:
     col_left, col_right = st.columns([3, 2])

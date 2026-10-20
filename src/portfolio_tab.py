@@ -5,6 +5,7 @@ from collections.abc import Callable
 import pandas as pd
 import streamlit as st
 
+from stockapp.portfolio_data import InsufficientDataError, ReturnsData, default_frequency, returns_matrix
 from stockapp.portfolio_input import (
     MAX_TICKERS,
     MAX_UPLOAD_BYTES,
@@ -18,6 +19,7 @@ from stockapp.portfolio_input import (
 DEFAULT_TICKERS = "AAPL, MSFT, JNJ, XOM, JPM, SPY"
 
 LoadInBase = Callable[[str, int | None, str], pd.Series]
+DailyRf = Callable[[], pd.Series | None]
 
 
 def _watchlist_input() -> Watchlist | None:
@@ -47,7 +49,22 @@ def _watchlist_input() -> Watchlist | None:
         return None
 
 
-def render(load_in_base: LoadInBase, years: int | None) -> None:
+def _risk_free(daily_rf: DailyRf) -> pd.Series | None:
+    """Daily T-bill rate, or a constant manual rate entered here if the T-bill fetch failed."""
+    rf = daily_rf()
+    if rf is not None:
+        return rf
+    st.warning("Couldn't fetch the T-bill rate. Enter a risk-free rate; a manual rate is in use.")
+    manual = st.number_input(
+        "Annual risk-free rate (%)", min_value=0.0, max_value=20.0, value=None, step=0.1, format="%.2f", key="pf_rf"
+    )
+    if manual is None:
+        return None
+    index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=252 * 60)
+    return pd.Series((1 + manual / 100) ** (1 / 252) - 1, index=index)
+
+
+def render(load_in_base: LoadInBase, daily_rf: DailyRf, years: int | None) -> None:
     """Render the Portfolio tab. Settings shared with the Stock tab are read from st.session_state."""
     base_currency = str(st.session_state.get("base_currency", "USD"))
     st.caption(f"Uses the Stock tab's base currency ({base_currency}), Kelly fraction and prior SD settings.")
@@ -90,3 +107,26 @@ def render(load_in_base: LoadInBase, years: int | None) -> None:
     )
     if holdings_value is not None:
         st.caption(f"Holdings value from shares × latest prices: {holdings_value:,.2f} {base_currency}.")
+
+    rf = _risk_free(daily_rf)
+    if rf is None:
+        return
+    frequencies = ["Daily", "Weekly"]
+    suggested = default_frequency(list(prices))
+    frequency = st.selectbox(
+        "Return frequency", frequencies, index=frequencies.index(suggested), key=f"pf_freq_{suggested}"
+    )
+    st.caption(
+        "Exchanges close at different times (e.g. New York vs Hong Kong), so their daily returns cover different "
+        "windows and daily correlations are biased toward zero. Weekly returns largely remove this; the default is "
+        "Weekly when the tickers span different exchanges. Weekly data is annualized with 52 periods."
+    )
+    try:
+        data: ReturnsData = returns_matrix(prices, rf, "Weekly" if frequency == "Weekly" else "Daily")
+    except InsufficientDataError as exc:
+        st.error(str(exc))
+        return
+    st.caption(
+        f"{data.common_days} trading dates are common to all {len(prices)} tickers "
+        f"({len(data.returns)} {frequency.lower()} returns)."
+    )
