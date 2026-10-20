@@ -39,8 +39,9 @@ Open the provided local URL in your browser.
 
 ## Tests
 
+With dependencies installed (step 2 above):
+
 ```bash
-pip install -r requirements-dev.txt
 pytest
 ```
 
