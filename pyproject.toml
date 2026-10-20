@@ -33,6 +33,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: timing tests that assert performance budgets"]
 
 [tool.ruff]
 line-length = 120
