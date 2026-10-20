@@ -16,6 +16,7 @@ dependencies = [
     "plotly>=7.1,<8",
     "exchange_calendars>=4.13,<5",
     "arch>=8.0,<9",
+    "scipy>=1.18,<2",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,7 @@ dev = [
     "pip-tools>=7.6,<8",
     "pandas-stubs>=3.0,<4",
     "pre-commit>=4.7,<5",
+    "scipy-stubs>=1.18,<2",
 ]
 
 [tool.setuptools.packages.find]
