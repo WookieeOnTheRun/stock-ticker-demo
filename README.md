@@ -3,13 +3,18 @@
 A simple Streamlit app that fetches free market data using `yfinance`, computes a fractional Kelly allocation from historical daily returns, and visualizes price history, return distribution, cumulative returns, and Kelly across lookback windows. Users can adjust the lookback window and Kelly fraction via sliders.
 
 ## Features
-- Free data source via yfinance (no API key)
+- Free data source via yfinance (no API key); split/dividend-adjusted daily closes
+- Price history cached per ticker, so slider changes are instant
+- Adjustable lookback (60–1000 trading days) and Kelly fraction (0.1–1.0)
 - Daily returns and log returns calculation
-- Fractional Kelly: `f = fraction * (mu / var)` with safety clamps
+- Fractional Kelly: `f = fraction * (mu / var)`, clamped to [0, 1] (no shorting or leverage)
 - Charts: price history, return histogram, cumulative returns, Kelly across windows
+- Ticker input validation and friendly errors for unknown tickers or network failures
 - CSV download of computed returns
 
 ## Quickstart
+
+Requires Python 3.12+.
 
 1. Create and activate a Python environment (recommended):
 
