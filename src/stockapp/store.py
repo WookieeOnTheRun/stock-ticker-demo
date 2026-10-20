@@ -30,7 +30,15 @@ CREATE TABLE IF NOT EXISTS actions (
     provider TEXT NOT NULL, ticker TEXT NOT NULL, date TEXT NOT NULL, type TEXT NOT NULL, value REAL,
     PRIMARY KEY (provider, ticker, date, type)
 );
+CREATE TABLE IF NOT EXISTS factors (
+    date TEXT PRIMARY KEY, mkt_rf REAL, smb REAL, hml REAL, rmw REAL, cma REAL, rf REAL, mom REAL
+);
+CREATE TABLE IF NOT EXISTS factor_log (
+    id INTEGER PRIMARY KEY CHECK (id = 1), last_fetched_utc TEXT NOT NULL
+);
 """
+
+FACTOR_COLUMNS = ["mkt_rf", "smb", "hml", "rmw", "cma", "rf", "mom"]
 
 
 @dataclass(frozen=True)
@@ -196,3 +204,32 @@ class Store:
         with self._connect() as conn, conn:
             for table in ("bars", "actions", "fetch_log"):
                 conn.execute(f"DELETE FROM {table} WHERE provider = ? AND ticker = ?", (provider, ticker))  # noqa: S608 - fixed table names
+
+    def get_factors(self) -> tuple[pd.DataFrame, datetime | None]:
+        """Cached daily factors (decimal returns, DatetimeIndex "Date") and when they were last fetched."""
+        with self._connect() as conn:
+            rows = conn.execute(f"SELECT date, {', '.join(FACTOR_COLUMNS)} FROM factors ORDER BY date").fetchall()  # noqa: S608 - fixed column list
+            log = conn.execute("SELECT last_fetched_utc FROM factor_log WHERE id = 1").fetchone()
+        frame = pd.DataFrame(rows, columns=["date", *FACTOR_COLUMNS])
+        frame.index = pd.DatetimeIndex(pd.to_datetime(frame.pop("date")), name="Date")
+        return frame.astype("float64"), datetime.fromisoformat(log[0]) if log else None
+
+    def replace_factors(self, factors: pd.DataFrame, fetched_utc: datetime) -> None:
+        """Replace the cached factor table and its fetch time in one transaction."""
+        rows = [
+            (ts.date().isoformat(), *(float(v) for v in values))
+            for ts, values in zip(
+                factors.index, factors[FACTOR_COLUMNS].itertuples(index=False, name=None), strict=True
+            )
+        ]
+        with self._connect() as conn, conn:
+            conn.execute("DELETE FROM factors")
+            conn.executemany(
+                f"INSERT INTO factors (date, {', '.join(FACTOR_COLUMNS)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",  # noqa: S608 - fixed column list
+                rows,
+            )
+            conn.execute(
+                "INSERT INTO factor_log (id, last_fetched_utc) VALUES (1, ?) "
+                "ON CONFLICT (id) DO UPDATE SET last_fetched_utc = excluded.last_fetched_utc",
+                (fetched_utc.isoformat(),),
+            )
