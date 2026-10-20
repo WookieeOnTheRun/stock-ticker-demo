@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from kelly import fractional_kelly
+from stockapp.kelly import fractional_kelly
 
 
 def test_too_few_returns_gives_zero():

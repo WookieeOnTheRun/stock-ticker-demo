@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from data import compute_returns, normalize_ticker
+from stockapp.data import compute_returns, normalize_ticker
 
 
 def test_normalize_ticker():
