@@ -375,3 +375,17 @@ def contributions_chart(contributions: pd.Series, top: int = 5) -> go.Figure:
     fig = go.Figure(go.Bar(x=largest.values, y=list(largest.index), orientation="h"))
     fig.update_layout(title="Top Drivers of the Latest Prediction", xaxis_title="Contribution to log-odds")
     return fig
+
+
+def fan_chart(fan: pd.DataFrame) -> go.Figure:
+    """Percentile fan of simulated equity over the next year (columns p5, p25, p50, p75, p95; rows = days)."""
+    days = list(range(len(fan)))
+    fig = go.Figure()
+    for low, high, name in (("p5", "p95", "5–95%"), ("p25", "p75", "25–75%")):
+        fig.add_trace(go.Scatter(x=days, y=fan[high], mode="lines", line={"width": 0}, showlegend=False))
+        fig.add_trace(go.Scatter(x=days, y=fan[low], mode="lines", line={"width": 0}, fill="tonexty", name=name))
+    fig.add_trace(go.Scatter(x=days, y=fan["p50"], mode="lines", name="Median"))
+    fig.update_layout(
+        title="1-Year Equity Fan at the Applied Fraction", xaxis_title="Trading days ahead", yaxis_title="Value of $1"
+    )
+    return fig

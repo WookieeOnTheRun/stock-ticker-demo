@@ -5,6 +5,7 @@ import streamlit as st
 
 import portfolio_tab
 from stockapp import distribution, factors, regimes, relative, risk, seasonality
+from stockapp.advice import BANNER, AdviceInputs, causal_skill_gate, decide, fan_chart_paths, rule_strategy
 from stockapp.backtest.cards import signal_cards
 from stockapp.backtest.engine import DEFAULT_COST_BPS, BacktestResult
 from stockapp.backtest.strategies import BUY_AND_HOLD, Strategy, kelly_buy_and_hold
@@ -17,6 +18,7 @@ from stockapp.charts import (
     cumulative_return_chart,
     drawdowns_chart,
     factor_chart,
+    fan_chart,
     growth_chart,
     kelly_over_windows_chart,
     month_average_chart,
@@ -190,6 +192,32 @@ def model_cached(
         return str(exc)
 
 
+@st.cache_data(show_spinner="Backtesting the advice rule...")
+def rule_track_record_cached(
+    ticker: str,
+    last_date: str,
+    key: str,
+    horizon: int,
+    rule_settings: tuple[float, float, float, float, float],
+    cost_bps: float,
+    ppy: float,
+    _p_used: pd.Series,
+    _prices: pd.Series,
+    _rf: pd.Series,
+) -> WalkForwardResult:
+    k_frac, prior, dd, p_buy, p_sell = rule_settings
+    return walk_forward(
+        rule_strategy(_p_used, k_frac, prior, dd, p_buy, p_sell), _prices, _rf, cost_bps, periods_per_year=ppy
+    )
+
+
+@st.cache_data(show_spinner=False)
+def fan_cached(
+    ticker: str, last_date: str, key: str, fraction: float, _prices: pd.Series, _rf: pd.Series
+) -> pd.DataFrame:
+    return fan_chart_paths(_prices, _rf, fraction)
+
+
 @st.cache_data(show_spinner=False)
 def fixed_cached(
     ticker: str,
@@ -221,6 +249,7 @@ def bootstrap_bands(excess: pd.Series, prior_sd_annual: float) -> tuple[KellyBan
 st.set_page_config(page_title="Fractional Kelly Analyzer", layout="wide")
 
 st.title("📈 Fractional Kelly Stock Analyzer")
+st.warning(BANNER)
 
 
 def portfolio_daily_rf() -> pd.Series | None:
@@ -407,9 +436,30 @@ with tab_stock:
 
     # Charts
     st.subheader("Charts")
-    tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative, tab_backtest, tab_model = (
-        st.tabs(["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative", "Backtest", "Model"])
-    )
+    stock_tab_names = [
+        "Price",
+        "Returns",
+        "Risk",
+        "Distribution",
+        "Regimes",
+        "Factors",
+        "Relative",
+        "Backtest",
+        "Model",
+        "Advice",
+    ]
+    (
+        tab_price,
+        tab_returns,
+        tab_risk,
+        tab_dist,
+        tab_regimes,
+        tab_factors,
+        tab_relative,
+        tab_backtest,
+        tab_model,
+        tab_advice,
+    ) = st.tabs(stock_tab_names)
     with tab_price:
         st.plotly_chart(price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""))
         st.caption(
@@ -871,3 +921,110 @@ with tab_stock:
                 st.plotly_chart(contributions_chart(report.latest_contributions))
                 st.caption("How to read this: features pushing the latest prediction up (right) or down (left).")
             st.dataframe(report.reliability.set_index("bin"))
+    with tab_advice:
+        st.warning(BANNER)
+        a1, a2, a3 = st.columns(3)
+        current_position = a1.slider("Your current position (fraction of portfolio)", 0.0, 1.0, 0.0, 0.05)
+        p_buy = a2.slider("p_buy", 0.50, 0.75, 0.55, 0.01)
+        p_sell = a3.slider("p_sell", 0.25, 0.50, 0.45, 0.01)
+        advice_horizon = int(st.session_state.get("model_horizon", 21))
+        advice_prices = close_all.loc[rf_all.index[0] :] if len(rf_all) else close_all
+        advice_key = f"{base_currency}|{history_label}|{manual_rf_pct if manual_rf_pct is not None else 'irx'}"
+        advice_report = model_cached(
+            ticker, last_date, advice_key, advice_horizon, benchmark, advice_prices, rf_all, benchmark_close
+        )
+        if isinstance(advice_report, str):
+            st.info(f"Advice needs the probability model, which is unavailable: {advice_report}.")
+        else:
+            p_model = advice_report.latest_probability if advice_report.has_skill else 0.5
+            regime_labels, _ = regimes_cached(ticker, last_date, settings_key, prior_sd_annual, r_all, rf_all)
+            known_regimes = regime_labels.dropna()
+            current_regime = str(known_regimes.iloc[-1]) if len(known_regimes) else None
+            inputs = AdviceInputs(
+                p=p_model,
+                kelly_p5=shrunk_band.p5,
+                target=applied(raws["Shrunk"]),
+                regime=current_regime,
+                dd_kelly=raws["Drawdown-constrained"],
+                current=current_position,
+            )
+            advice = decide(inputs, p_buy, p_sell)
+            st.subheader(f"{advice.action} → target position {advice.new_position:.0%}")
+            if not advice_report.has_skill:
+                st.info("The model has no demonstrated out-of-sample skill for this ticker, so p is set to 0.5.")
+            st.dataframe(pd.DataFrame({"Fired": advice.clauses}).rename_axis("Rule clause"))
+            st.caption(
+                f"Inputs: p = {inputs.p:.2f} (H = {advice_horizon} days), shrunk Kelly 5th percentile = "
+                f"{inputs.kelly_p5:.2f}, applied fractional Kelly target = {inputs.target:.0%}, regime = "
+                f"{inputs.regime or 'unknown'}, drawdown-constrained Kelly = {inputs.dd_kelly:.0%}. SELL / TRIM is "
+                "checked first and moves to the lowest cap that fired (target, 0, or drawdown-constrained Kelly)."
+            )
+            contributions = advice_report.latest_contributions
+            top = contributions.reindex(contributions.abs().sort_values(ascending=False).index).head(5)
+            st.markdown("**Top drivers of the model probability**")
+            st.dataframe(top.rename("Contribution to log-odds").to_frame())
+
+            st.markdown("**Out-of-sample track record of this exact rule**")
+            gate = causal_skill_gate(
+                advice_report.probabilities, advice_report.labels, advice_report.climatology, advice_horizon
+            )
+            rule_settings = (float(k_fraction), float(prior_sd_annual), max_dd, float(p_buy), float(p_sell))
+            record = rule_track_record_cached(
+                ticker,
+                last_date,
+                advice_key,
+                advice_horizon,
+                rule_settings,
+                DEFAULT_COST_BPS,
+                periods_per_year,
+                gate,
+                advice_prices,
+                rf_all,
+            )
+            baseline_specs = {
+                "Buy & hold": (BUY_AND_HOLD.name, ("", 0.0, 0.0, 0.0)),
+                "Kelly buy & hold": ("Kelly buy & hold", (method, float(k_fraction), float(prior_sd_annual), max_dd)),
+            }
+            baselines = {
+                label: walk_forward_cached(
+                    ticker,
+                    last_date,
+                    advice_key,
+                    name,
+                    settings,
+                    DEFAULT_COST_BPS,
+                    0.0,
+                    "expanding",
+                    periods_per_year,
+                    advice_prices,
+                    rf_all,
+                )
+                for label, (name, settings) in baseline_specs.items()
+            }
+            record_table = pd.DataFrame(
+                {"Advice rule": record.out_of_sample.metrics}
+                | {name: wf.out_of_sample.metrics for name, wf in baselines.items()}
+            ).loc[["CAGR", "Sharpe", "Max drawdown", "Exposure", "Annual turnover"]]
+            st.dataframe(record_table.style.format("{:.2f}"))
+            st.caption(
+                "Walk-forward: Kelly inputs are estimated on each training window; p is used only after the model's "
+                "own past predictions (with known outcomes) beat climatology, else 0.5. "
+                f"Costs {DEFAULT_COST_BPS:g} bps per side."
+            )
+            st.plotly_chart(
+                growth_chart(
+                    pd.DataFrame(
+                        {"Advice rule": record.out_of_sample.equity}
+                        | {name: wf.out_of_sample.equity for name, wf in baselines.items()}
+                    )
+                )
+            )
+            st.caption("How to read this: growth of $1 for the rule and both baselines over the same span.")
+
+            st.markdown("**Forward fan**")
+            fan = fan_cached(ticker, last_date, advice_key, round(inputs.target, 4), advice_prices, rf_all)
+            st.plotly_chart(fan_chart(fan))
+            st.caption(
+                f"Resampled history, not a forecast: 1,000 one-year paths at the applied fraction {inputs.target:.0%}, "
+                "drawn in 20-day blocks from this stock's own past returns."
+            )
