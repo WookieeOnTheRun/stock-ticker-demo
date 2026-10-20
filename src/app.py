@@ -4,11 +4,15 @@ import pandas as pd
 import streamlit as st
 
 from stockapp import distribution, factors, regimes, relative, risk, seasonality
+from stockapp.backtest.engine import DEFAULT_COST_BPS, BacktestResult
+from stockapp.backtest.strategies import BUY_AND_HOLD, SIGNALS, Strategy, kelly_buy_and_hold
+from stockapp.backtest.walkforward import TRAIN_YEARS, TRIALS_CAPTION, WalkForwardResult, fixed_params, walk_forward
 from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, kelly_distribution
 from stockapp.calendars import calendar_code, is_stale, sessions_per_year
 from stockapp.charts import (
     acf_chart,
     cumulative_return_chart,
+    drawdowns_chart,
     factor_chart,
     growth_chart,
     kelly_over_windows_chart,
@@ -130,6 +134,54 @@ def factor_fit_cached(
     ticker: str, last_date: str, key: str, factors_through: str, _r: pd.Series, _factors: pd.DataFrame
 ) -> factors.FactorFit:
     return factors.factor_regression(factors.stock_excess_returns(_r, _factors), _factors)
+
+
+def strategy_by_name(name: str, kelly_settings: tuple[str, float, float, float]) -> Strategy:
+    """A registered signal, or Kelly buy & hold configured with the sidebar's Kelly settings."""
+    return kelly_buy_and_hold(*kelly_settings) if name == "Kelly buy & hold" else SIGNALS[name]
+
+
+@st.cache_data(show_spinner="Running walk-forward backtest...")
+def walk_forward_cached(
+    ticker: str,
+    last_date: str,
+    key: str,
+    name: str,
+    kelly_settings: tuple[str, float, float, float],
+    cost_bps: float,
+    slippage_bps: float,
+    mode: str,
+    ppy: float,
+    _prices: pd.Series,
+    _rf: pd.Series,
+) -> WalkForwardResult:
+    return walk_forward(
+        strategy_by_name(name, kelly_settings),
+        _prices,
+        _rf,
+        cost_bps,
+        slippage_bps,
+        mode="rolling" if mode == "rolling" else "expanding",
+        periods_per_year=ppy,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def fixed_cached(
+    ticker: str,
+    last_date: str,
+    key: str,
+    name: str,
+    kelly_settings: tuple[str, float, float, float],
+    params_index: int,
+    cost_bps: float,
+    slippage_bps: float,
+    ppy: float,
+    _prices: pd.Series,
+    _rf: pd.Series,
+) -> BacktestResult:
+    strategy = strategy_by_name(name, kelly_settings)
+    return fixed_params(strategy, _prices, strategy.grid[params_index], _rf, cost_bps, slippage_bps, ppy)
 
 
 @st.cache_data(show_spinner=False)
@@ -309,8 +361,8 @@ else:
 
 # Charts
 st.subheader("Charts")
-tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative = st.tabs(
-    ["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative"]
+tab_price, tab_returns, tab_risk, tab_dist, tab_regimes, tab_factors, tab_relative, tab_backtest = st.tabs(
+    ["Price", "Returns", "Risk", "Distribution", "Regimes", "Factors", "Relative", "Backtest"]
 )
 with tab_price:
     st.plotly_chart(price_chart(close, load_actions_cached(ticker), dividend_currency=native_currency or ""))
@@ -590,3 +642,93 @@ export_df = returns_df.assign(rf_daily=rf_df, excess_return=excess)
 st.dataframe(export_df.tail(20))
 csv = export_df.to_csv().encode("utf-8")
 st.download_button("Download returns CSV", data=csv, file_name=f"{ticker}_returns.csv", mime="text/csv")
+
+with tab_backtest:
+    st.caption(f"Over the full {history_label} history, in {price_currency}, with the T-bill rate earned on cash.")
+    kelly_settings = (method, float(k_fraction), float(prior_sd_annual), max_dd)
+    strategy_names = [*SIGNALS, "Kelly buy & hold"]
+    b1, b2, b3, b4, b5 = st.columns(5)
+    bt_name = b1.selectbox("Strategy", strategy_names)
+    bt_mode = b2.radio("Parameters", ["walk-forward", "fixed"], horizontal=True)
+    bt_window = b3.radio("Training window", ["expanding", "rolling"], horizontal=True)
+    bt_cost = b4.number_input("Cost (bps per side)", min_value=0.0, max_value=100.0, value=DEFAULT_COST_BPS, step=0.5)
+    bt_slip = b5.number_input("Slippage (bps per side)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+    st.caption(
+        f"Assumptions: {bt_cost:g} bps cost + {bt_slip:g} bps slippage on every change in position; decisions at a "
+        f"close earn the next day's return. Walk-forward: train on ≥ {TRAIN_YEARS} years, test the next year, repeat."
+    )
+    bt_prices = close_all.loc[rf_all.index[0] :] if len(rf_all) else close_all
+    if bt_prices.index[-1] < bt_prices.index[0] + pd.DateOffset(years=TRAIN_YEARS, days=30):
+        st.info(f"Backtests need more than {TRAIN_YEARS} years of history; choose a longer History.")
+    else:
+        # Backtests use the full history, so the lookback slider is not part of their cache key, and only the
+        # Kelly strategy depends on the Kelly settings.
+        bt_key = f"{base_currency}|{history_label}|{manual_rf_pct if manual_rf_pct is not None else 'irx'}"
+        bt_args = (ticker, last_date, bt_key)
+        no_kelly = ("", 0.0, 0.0, 0.0)
+
+        def run_wf(name: str) -> WalkForwardResult:
+            settings = kelly_settings if name == "Kelly buy & hold" else no_kelly
+            return walk_forward_cached(
+                *bt_args, name, settings, bt_cost, bt_slip, bt_window, periods_per_year, bt_prices, rf_all
+            )
+
+        bh = run_wf(BUY_AND_HOLD.name)
+        kbh = run_wf("Kelly buy & hold")
+        strategy = strategy_by_name(bt_name, kelly_settings)
+        span_start = bh.positions.index[0]
+        columns: dict[str, dict[str, float]] = {}
+        curves: dict[str, pd.Series] = {}
+        if bt_mode == "walk-forward":
+            wf = run_wf(bt_name)
+            columns[f"{bt_name} — in-sample"] = wf.in_sample.metrics
+            columns[f"{bt_name} — out-of-sample"] = wf.out_of_sample.metrics
+            curves[f"{bt_name} (out-of-sample)"] = wf.out_of_sample.equity
+            trials = wf.trials + bh.trials + kbh.trials
+        else:
+            labels = [", ".join(f"{k}={v}" for k, v in p.items()) or "no parameters" for p in strategy.grid]
+            params_index = labels.index(st.selectbox("Fixed parameters", labels))
+            fixed = fixed_cached(
+                *bt_args,
+                bt_name,
+                kelly_settings if bt_name == "Kelly buy & hold" else no_kelly,
+                params_index,
+                bt_cost,
+                bt_slip,
+                periods_per_year,
+                bt_prices.loc[span_start:],
+                rf_all,
+            )
+            columns[f"{bt_name} — fixed parameters (in-sample)"] = fixed.metrics
+            curves[f"{bt_name} (fixed parameters)"] = fixed.equity
+            trials = 1 + bh.trials + kbh.trials
+            st.warning(
+                "Fixed parameters are not out-of-sample: they may have been chosen with hindsight, and any estimated "
+                "quantity (such as a Kelly fraction) is fitted on the same period it is evaluated on."
+            )
+        columns["Buy & hold — out-of-sample span"] = bh.out_of_sample.metrics
+        columns["Kelly buy & hold — out-of-sample"] = kbh.out_of_sample.metrics
+        curves["Buy & hold"] = bh.out_of_sample.equity
+        curves["Kelly buy & hold (out-of-sample)"] = kbh.out_of_sample.equity
+
+        equity = pd.DataFrame(curves)
+        st.plotly_chart(growth_chart(equity))
+        st.caption(
+            f"How to read this: growth of $1 from {span_start.date()}, the first out-of-sample decision; every line "
+            "starts on the same day so they can be compared directly."
+        )
+        st.metric("Trials (parameter combinations evaluated)", trials)
+        st.caption(TRIALS_CAPTION)
+        table = pd.DataFrame(columns)
+        pct_rows = ["CAGR", "Ann. vol", "Max drawdown", "Hit rate", "Exposure"]
+        formatted = table.apply(
+            lambda row: row.map(lambda v: f"{v:.1%}" if row.name in pct_rows else f"{v:.2f}"), axis=1
+        )
+        st.dataframe(formatted)
+        st.caption(
+            "In-sample is the final fold's chosen parameters on the training data that chose them; out-of-sample "
+            "stitches each test year, traded with parameters chosen before it. Sharpe and Sortino are on returns in "
+            "excess of the T-bill rate."
+        )
+        st.plotly_chart(drawdowns_chart(equity))
+        st.caption("How to read this: how far each strategy sat below its own previous high.")

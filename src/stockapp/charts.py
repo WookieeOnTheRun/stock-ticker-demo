@@ -254,3 +254,14 @@ def month_average_chart(average: pd.DataFrame) -> go.Figure:
         yaxis_tickformat=".1%",
     )
     return fig
+
+
+def drawdowns_chart(equity: pd.DataFrame) -> go.Figure:
+    """Drawdown from the running peak for each equity curve (column)."""
+    fig = go.Figure()
+    for column in equity.columns:
+        curve = equity[column].dropna()
+        drawdown = curve / curve.cummax() - 1
+        fig.add_trace(go.Scatter(x=drawdown.index, y=drawdown.values, mode="lines", name=str(column)))
+    fig.update_layout(title="Drawdown From Peak", xaxis_title="Date", yaxis_title="Drawdown", yaxis_tickformat=".0%")
+    return fig
