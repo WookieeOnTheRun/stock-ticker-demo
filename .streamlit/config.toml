@@ -3,3 +3,6 @@ base = "light"
 primaryColor = "#4CAF50"
 backgroundColor = "#FFFFFF"
 textColor = "#222222"
+
+[server]
+maxUploadSize = 1
