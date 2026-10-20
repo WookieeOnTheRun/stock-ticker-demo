@@ -1,0 +1,9 @@
+{
+  "source": "yfinance 1.7.0 Ticker.history_metadata['currency'], recorded 2026-10-20",
+  "currencies": {
+    "VOD.L": "GBp",
+    "NPN.JO": "ZAc",
+    "TEVA.TA": "ILA",
+    "MSFT": "USD"
+  }
+}

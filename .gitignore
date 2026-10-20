@@ -4,7 +4,7 @@ __pycache__/
 .pytest_cache/
 docs/prompts/*
 .streamlit/secrets.toml
-data/
+/data/
 *.sqlite
 *.db
 .mypy_cache/

@@ -35,7 +35,7 @@ def with_retries[T](
     fn: Callable[[], T],
     attempts: int = MAX_ATTEMPTS,
     base_delay: float = BACKOFF_BASE_S,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
 ) -> T:
     """Call fn, retrying ProviderUnavailable and RateLimited with exponential backoff and jitter."""
     for attempt in range(attempts):
@@ -48,7 +48,7 @@ def with_retries[T](
             logger.info(
                 "Retrying after %s (attempt %d of %d, sleeping %.2fs)", type(exc).__name__, attempt + 1, attempts, delay
             )
-            sleep(delay)
+            (sleep or time.sleep)(delay)
     raise AssertionError("unreachable")
 
 
