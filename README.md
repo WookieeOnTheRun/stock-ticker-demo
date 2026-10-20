@@ -23,10 +23,11 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
 
-2. Install dependencies:
+2. Install the pinned dependencies, then the app itself in editable mode with dev tools:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock
+pip install -e ".[dev]"
 ```
 
 3. Run the app:
@@ -44,6 +45,16 @@ With dependencies installed (step 2 above):
 ```bash
 pytest
 ```
+
+## Dependencies
+
+`pyproject.toml` is the single source of truth: edit version ranges there (runtime deps under `[project] dependencies`, dev tools under `[project.optional-dependencies] dev`). `requirements.lock` pins every package, dev tools included, and is generated from it with pip-tools. CI installs from the lockfile. After changing `pyproject.toml`, regenerate and commit the lockfile:
+
+```bash
+pip-compile --extra dev --strip-extras --allow-unsafe --no-emit-index-url -o requirements.lock pyproject.toml
+```
+
+To upgrade everything within the allowed ranges, add `--upgrade`.
 
 ## Notes
 - This app uses historical daily returns to estimate mean/variance; Kelly is sensitive to estimation error—use conservative fractions.
