@@ -32,6 +32,8 @@ certifi==2026.10.19
     #   requests
 cffi==2.1.1
     # via curl-cffi
+cfgv==3.5.0
+    # via pre-commit
 charset-normalizer==3.5.2
     # via requests
 click==8.5.0
@@ -45,12 +47,19 @@ cyclonedx-python-lib==11.12.0
     # via pip-audit
 defusedxml==0.7.1
     # via py-serializable
+distlib==0.4.4
+    # via virtualenv
 filelock==4.2.4
-    # via cachecontrol
+    # via
+    #   cachecontrol
+    #   python-discovery
+    #   virtualenv
 h11==0.16.0
     # via uvicorn
 hypothesis==6.170.5
     # via stockapp (pyproject.toml)
+identify==2.6.20
+    # via pre-commit
 idna==3.20
     # via
     #   anyio
@@ -91,6 +100,8 @@ narwhals==2.27.1
     # via
     #   altair
     #   plotly
+nodeenv==1.11.0
+    # via pre-commit
 numpy==2.5.4
     # via
     #   pandas
@@ -110,6 +121,7 @@ packaging==26.3
     #   plotly
     #   pytest
     #   streamlit
+    #   virtualenv
     #   wheel
 pandas==3.0.6
     # via
@@ -135,11 +147,14 @@ pip-tools==7.6.2
 platformdirs==4.13.5
     # via
     #   pip-audit
+    #   virtualenv
     #   yfinance
 plotly==7.1.0
     # via stockapp (pyproject.toml)
 pluggy==1.7.0
     # via pytest
+pre-commit==4.7.0
+    # via stockapp (pyproject.toml)
 protobuf==7.36.2
     # via
     #   streamlit
@@ -166,10 +181,14 @@ pytest==9.1.1
     # via stockapp (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via pandas
+python-discovery==1.6.4
+    # via virtualenv
 python-multipart==0.0.32
     # via streamlit
 pytz==2026.5
     # via yfinance
+pyyaml==6.0.3
+    # via pre-commit
 referencing==0.37.0
     # via
     #   jsonschema
@@ -218,6 +237,8 @@ urllib3==2.8.0
     # via requests
 uvicorn==0.54.0
     # via streamlit
+virtualenv==21.14.11
+    # via pre-commit
 watchdog==6.0.0
     # via streamlit
 websockets==17.3

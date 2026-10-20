@@ -25,6 +25,7 @@ dev = [
     "hypothesis>=6.170,<7",
     "pip-tools>=7.6,<8",
     "pandas-stubs>=3.0,<4",
+    "pre-commit>=4.7,<5",
 ]
 
 [tool.setuptools.packages.find]
