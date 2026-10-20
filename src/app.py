@@ -8,9 +8,10 @@ from stockapp.calendars import is_stale, sessions_per_year
 from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, price_chart, returns_histogram
 from stockapp.data import compute_returns, normalize_ticker
 from stockapp.drawdown import drawdown_constrained_kelly
+from stockapp.fx import BASE_CURRENCIES, convert_prices, fx_ticker, major_currency
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
 from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
-from stockapp.repository import load_bars
+from stockapp.repository import load_bars, load_currency
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
@@ -25,9 +26,15 @@ drawdown_kelly_cached = st.cache_data(show_spinner=False)(drawdown_constrained_k
 
 
 @st.cache_data(ttl=300, show_spinner="Loading price history...")
-def load_close(ticker: str, years: int | None) -> pd.Series:
-    """Adjusted closes named "Close" for the last `years` years (None = all available)."""
-    return load_bars(ticker, years)["adj_close"].rename("Close")
+def load_close(ticker: str, years: int | None) -> tuple[pd.Series, str | None]:
+    """Adjusted closes named "Close" for the last `years` years (None = all available), and the quote currency."""
+    return load_bars(ticker, years)["adj_close"].rename("Close"), load_currency(ticker)
+
+
+@st.cache_data(ttl=300, show_spinner="Loading FX rates...")
+def load_fx(pair: str, years: int | None) -> pd.Series:
+    """FX closes for a yfinance pair such as GBPUSD=X."""
+    return load_bars(pair, years)["close"]
 
 
 @st.cache_data(show_spinner=False)
@@ -49,6 +56,7 @@ col_left, col_right = st.columns([3, 2])
 with col_left:
     raw_ticker = st.text_input("Ticker", value="MSFT", placeholder="e.g., AAPL, MSFT, SPY")
     history_label = st.selectbox("History", list(HISTORY_OPTIONS), index=list(HISTORY_OPTIONS).index("10y"))
+    base_currency = st.selectbox("Base currency", BASE_CURRENCIES, index=BASE_CURRENCIES.index("USD"))
     lookback_slot = st.empty()  # filled once the available history is known
     k_fraction = st.slider("Kelly fraction multiplier", min_value=0.1, max_value=1.0, value=0.5, step=0.1)
     prior_sd_annual = st.number_input(
@@ -93,10 +101,32 @@ if ticker is None:
     st.stop()
 
 try:
-    close_all = load_close(ticker, HISTORY_OPTIONS[history_label])
+    native_close, native_currency = load_close(ticker, HISTORY_OPTIONS[history_label])
 except Exception as e:
     st.error(f"Could not load data for {ticker}: {e}")
     st.stop()
+
+# Convert to the base currency (minor units such as GBp -> GBP first). Returns, and so Kelly, are measured in it.
+major, divisor = major_currency(native_currency or base_currency)
+pair = None if major == base_currency else fx_ticker(major, base_currency)
+try:
+    fx_rate = load_fx(pair, HISTORY_OPTIONS[history_label]) if pair else None
+    close_all = convert_prices(native_close, divisor, fx_rate)
+    price_currency = base_currency
+except Exception:
+    st.warning(f"Couldn't load the {pair} FX rate; prices are shown in {major}, not converted to {base_currency}.")
+    close_all = convert_prices(native_close, divisor, None)
+    price_currency = major
+if close_all.empty:
+    st.error(f"No {pair} FX rates overlap {ticker}'s price history.")
+    st.stop()
+with col_left:
+    if native_currency is None:
+        st.caption(f"Quote currency unknown; prices assumed to be in {base_currency}.")
+    elif native_currency == price_currency:
+        st.caption(f"Prices in {price_currency}.")
+    else:
+        st.caption(f"Prices in {native_currency} (native), converted to {price_currency}.")
 
 if is_stale(ticker, close_all.index[-1].date(), date.today()):
     st.warning(f"Data for {ticker} may be stale: the last bar is from {close_all.index[-1].date()}.")
