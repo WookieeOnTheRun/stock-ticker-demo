@@ -6,6 +6,7 @@ from stockapp.charts import cumulative_return_chart, kelly_over_windows_chart, p
 from stockapp.data import compute_returns, fetch_price_history, normalize_ticker
 from stockapp.drawdown import drawdown_constrained_kelly
 from stockapp.kelly import excess_returns, fractional_kelly, log_optimal_kelly, shrunk_kelly
+from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ratio
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
 
 WINDOW_SIZES = [60, 120, 252, 504]
@@ -117,21 +118,31 @@ with p2:
 
 # Kelly breakdown
 st.subheader("Kelly Breakdown")
-metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5, metrics_col6 = st.columns(6)
-metrics_col1.metric("Mean Excess Return (daily)", f"{kr.mean_return:.6f}")
-metrics_col2.metric("Variance", f"{kr.variance:.6f}")
-metrics_col3.metric("Std Dev", f"{kr.stdev:.6f}")
-metrics_col4.metric("Raw Kelly ((mu-r)/var)", f"{kr.raw_kelly:.4f}")
-metrics_col5.metric("Shrunk Kelly (raw)", f"{shrunk_raw:.4f}")
-metrics_col6.metric("Log-optimal Kelly (raw)", f"{log_opt_raw:.4f}")
-st.metric(f"Drawdown-constrained Kelly (max DD {max_dd_pct}%)", f"{dd_raw:.2f}")
-for name, band in (("Gaussian", gauss_band), ("Shrunk", shrunk_band)):
-    st.caption(
-        f"{name} Kelly bootstrap: 5th {band.p5:.2f} · median {band.p50:.2f} · 95th {band.p95:.2f} · "
-        f"P(f* > 0) = {band.prob_positive:.0%}"
-    )
+metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
+metrics_col1.metric("CAGR", f"{cagr(close):.1%}")
+metrics_col2.metric("Annualized volatility", f"{annualized_volatility(returns_df['simple_return']):.1%}")
+metrics_col3.metric("Sharpe ratio (excess)", f"{sharpe_ratio(excess):.2f}")
+metrics_col4.metric("Growth at applied fraction", f"{growth_rate(kr.applied_kelly, rf_df, excess):.1%}")
+st.caption("Growth at applied fraction is a second-order approximation: g(f) ≈ 252·[mean(rf) + f·mean(e) − f²σ²/2].")
 
 st.metric(label="Applied Fractional Kelly", value=f"{kr.applied_kelly:.4f}", delta=f"fraction={kr.fraction:.2f}")
+
+with st.expander("Advanced"):
+    adv1, adv2, adv3, adv4 = st.columns(4)
+    adv1.metric("Mean excess return (daily)", f"{kr.mean_return:.6f}")
+    adv2.metric("Variance (daily)", f"{kr.variance:.6f}")
+    adv3.metric("Std dev (daily)", f"{kr.stdev:.6f}")
+    adv4.metric("Mean risk-free (daily)", f"{rf_df.mean():.6f}")
+    adv5, adv6, adv7, adv8 = st.columns(4)
+    adv5.metric("Raw Kelly ((mu-r)/var)", f"{kr.raw_kelly:.4f}")
+    adv6.metric("Shrunk Kelly (raw)", f"{shrunk_raw:.4f}")
+    adv7.metric("Log-optimal Kelly (raw)", f"{log_opt_raw:.4f}")
+    adv8.metric(f"Drawdown-constrained (max DD {max_dd_pct}%)", f"{dd_raw:.2f}")
+    for name, band in (("Gaussian", gauss_band), ("Shrunk", shrunk_band)):
+        st.caption(
+            f"{name} Kelly bootstrap: 5th {band.p5:.2f} · median {band.p50:.2f} · 95th {band.p95:.2f} · "
+            f"P(f* > 0) = {band.prob_positive:.0%}"
+        )
 
 # Kelly across fixed windows of full history (independent of the lookback slider); skip windows longer than the data
 kelly_by_window = {
