@@ -96,6 +96,53 @@ Shrinkage matters because the daily mean is very noisy: its standard error `σ/�
 
 **Bootstrap bands.** The app resamples the lookback's excess returns 1,000 times using 20-day blocks (a moving-block bootstrap, which keeps volatility clustering and short-range autocorrelation within each block) and recomputes Gaussian and Shrunk Kelly on each resample. The table shows the 5th–95th percentile range: roughly, the values of `f*` that are consistent with the data. If that band includes 0, the data can't distinguish the stock's expected excess return from zero and the app says so; Kelly sizing is unreliable there.
 
+## Watchlist scanner
+
+`python -m stockapp.scan` runs the Advice tab's BUY / SELL / HOLD rules for every ticker in a watchlist CSV (a
+`ticker` column, optionally `weight` for current holdings) through the cached data layer, and writes an HTML report
+plus a JSON file of actions next to it:
+
+```bash
+python -m stockapp.scan --watchlist watchlist.csv --out reports/scan.html            # also writes reports/scan.json
+python -m stockapp.scan --watchlist watchlist.csv --out reports/scan.html --email    # email only changed actions
+```
+
+`--email` compares with the previous JSON and sends only tickers whose action changed, over SMTP with STARTTLS. It
+reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `ALERT_TO` from the environment; nothing is stored in
+the repo. Each ticker trains the walk-forward model, so expect several seconds per ticker.
+
+### Scheduling
+
+The scanner doesn't schedule itself. With cron (weekdays at 22:30 UTC, after the US close):
+
+```cron
+30 22 * * 1-5  cd /path/to/stock-ticker-demo && .venv/bin/python -m stockapp.scan --watchlist watchlist.csv --out reports/scan.html --email >> reports/scan.log 2>&1
+```
+
+Or as a scheduled GitHub Actions workflow, with the SMTP settings stored as repository secrets. Keep the previous
+`reports/scan.json` between runs (for example with `actions/cache`) so `--email` can detect changes:
+
+```yaml
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.lock && pip install -e .
+      - run: python -m stockapp.scan --watchlist watchlist.csv --out reports/scan.html --email
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+```
+
 ## Notes
 - Kelly is sensitive to estimation error even with shrinkage; use conservative fractions.
 - `^IRX` is a discount-basis yield; treating it as an effective annual rate understates the rate slightly (about 0.17 percentage points at 4%). The rate is USD-only, so non-USD tickers should really use a local rate (not yet supported).
