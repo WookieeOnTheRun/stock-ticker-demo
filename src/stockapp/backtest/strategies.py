@@ -73,7 +73,3 @@ def kelly_buy_and_hold(
         positions=_constant,
         estimate=estimate,
     )
-
-
-SIGNALS: dict[str, Strategy] = {BUY_AND_HOLD.name: BUY_AND_HOLD}
-"""Registered causal signals (Part B adds to this). Every entry must pass the look-ahead guard test."""

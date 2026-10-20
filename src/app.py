@@ -6,7 +6,7 @@ import streamlit as st
 import portfolio_tab
 from stockapp import distribution, factors, regimes, relative, risk, seasonality
 from stockapp.backtest.engine import DEFAULT_COST_BPS, BacktestResult
-from stockapp.backtest.strategies import BUY_AND_HOLD, SIGNALS, Strategy, kelly_buy_and_hold
+from stockapp.backtest.strategies import BUY_AND_HOLD, Strategy, kelly_buy_and_hold
 from stockapp.backtest.walkforward import TRAIN_YEARS, TRIALS_CAPTION, WalkForwardResult, fixed_params, walk_forward
 from stockapp.bootstrap import KellyBand, block_bootstrap_indices, kelly_band, kelly_distribution
 from stockapp.calendars import calendar_code, is_stale, sessions_per_year
@@ -35,6 +35,7 @@ from stockapp.metrics import annualized_volatility, cagr, growth_rate, sharpe_ra
 from stockapp.providers.yfinance_provider import YFinanceProvider
 from stockapp.repository import load_actions, load_bars, load_currency
 from stockapp.riskfree import align_rf, daily_rf, fetch_rf_annual_pct
+from stockapp.signals import SIGNALS
 
 WINDOW_SIZES = [60, 120, 252, 504]
 METHODS = ["Gaussian", "Shrunk", "Log-optimal", "Drawdown-constrained"]

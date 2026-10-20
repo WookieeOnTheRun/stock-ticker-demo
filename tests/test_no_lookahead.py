@@ -1,5 +1,5 @@
 """
-Look-ahead guard (Tier 5, A5). For every registered signal (stockapp.backtest.strategies.SIGNALS, every grid point)
+Look-ahead guard (Tier 5, A5). For every registered signal (stockapp.signals.SIGNALS, every grid point)
 and the walk-forward harness itself: compute the output on the full series and on the series truncated at a random
 date t; values up to t must be identical. 20 random cuts per function on seeded synthetic data.
 Feature functions (Part C) must be added here when they are registered.
@@ -12,8 +12,9 @@ import pandas as pd
 import pytest
 from fixtures import make_prices
 
-from stockapp.backtest.strategies import SIGNALS, Strategy, kelly_buy_and_hold
+from stockapp.backtest.strategies import Strategy, kelly_buy_and_hold
 from stockapp.backtest.walkforward import walk_forward
+from stockapp.signals import SIGNALS
 
 N_CUTS = 20
 PRICES = make_prices(1600, mu=0.0003, sigma=0.015, seed=21)  # about 6.3 years of business days
