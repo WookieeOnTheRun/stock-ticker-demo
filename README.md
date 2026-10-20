@@ -67,9 +67,45 @@ CI (`.github/workflows/ci.yml`) runs these on every push and pull request for Py
 - `src/stockapp/`: installable package (`data`, `kelly`, `charts`)
 - `tests/`: pytest suite; `tests/fixtures.py` generates synthetic prices
 
-## Secrets
+## Secrets and sign-in
 
-The app needs no secrets today. If a later feature does, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` (git-ignored) and fill it in locally.
+The app needs no secrets: without any, it runs anonymously with every analytics feature. Optional sign-in adds saved
+watchlists and settings. Secrets come only from `.streamlit/secrets.toml` (git-ignored) or the environment; start from
+`.streamlit/secrets.toml.example`.
+
+### Configuring sign-in locally
+
+Sign-in uses Streamlit's native OpenID Connect support (`st.login`), which needs the `streamlit[auth]` extra (Authlib),
+installed with the app. Any OIDC provider works (Google, Microsoft Entra ID, Auth0, Okta, ...); embedded apps aren't
+supported.
+
+1. Register an OAuth / OIDC web application with your provider and add the redirect URI
+   `http://localhost:8501/oauth2callback` (use your deployed URL in production; it must end in `/oauth2callback`).
+2. Generate a strong cookie secret and an app salt:
+
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(48))"   # cookie_secret
+   python -c "import secrets; print(secrets.token_urlsafe(32))"   # app_salt
+   ```
+
+3. Fill in `.streamlit/secrets.toml`:
+
+   ```toml
+   app_salt = "..."
+
+   [auth]
+   redirect_uri = "http://localhost:8501/oauth2callback"
+   cookie_secret = "..."
+   client_id = "..."
+   client_secret = "..."
+   server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+   ```
+
+4. Restart the app; a sign-in button appears in the sidebar.
+
+Saved data is keyed by `sha256(app_salt + sub)`, where `sub` is the provider's stable subject claim; no email, name or
+raw claim is stored. Keep `app_salt` constant, since changing it orphans existing saved data. The Settings page has a
+"delete my data" button.
 
 ## Dependencies
 

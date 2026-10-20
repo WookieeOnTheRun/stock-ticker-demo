@@ -3,7 +3,7 @@
 import streamlit as st
 
 from stockapp.advice import BANNER
-from stockapp_ui import state
+from stockapp_ui import auth, state
 from stockapp_ui.router import available_pages
 
 st.set_page_config(page_title="Fractional Kelly Analyzer", layout="wide")
@@ -15,6 +15,7 @@ pages = [
 ]
 navigation = st.navigation(pages)
 state.render_sidebar()
+auth.render_sidebar_controls()
 
 st.title("📈 Fractional Kelly Stock Analyzer")
 st.warning(BANNER)
