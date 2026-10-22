@@ -1,6 +1,9 @@
+"""Return-distribution diagnostics: moments, normality and autocorrelation tests, Q-Q data, a Student-t fit and
+the Hurst exponent. Used to judge whether Gaussian Kelly's assumptions hold for a stock.
+"""
+
 import math
 from dataclasses import dataclass
-from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
@@ -11,6 +14,7 @@ LJUNG_BOX_LAG = 10
 
 
 def _moments(r: pd.Series) -> tuple[np.ndarray, float]:
+    """The non-missing values centered on their mean, and m2, their second central moment (ddof 0)."""
     values = r.dropna().to_numpy(dtype=float)
     centered = values - values.mean()
     return centered, float((centered**2).mean())
@@ -40,6 +44,7 @@ def jarque_bera(r: pd.Series) -> tuple[float, float]:
 
 
 def _plotting_positions(n: int) -> np.ndarray:
+    """Probabilities (i - 0.5) / n for i = 1..n, at which Q-Q plots take the theoretical quantiles."""
     return (np.arange(1, n + 1) - 0.5) / n
 
 
@@ -50,13 +55,14 @@ def qq_normal(r: pd.Series) -> pd.DataFrame:
     """
     values = np.sort(r.dropna().to_numpy(dtype=float))
     standardized = (values - values.mean()) / values.std(ddof=1)
-    normal = NormalDist()
-    theoretical = np.array([normal.inv_cdf(p) for p in _plotting_positions(values.size)])
+    theoretical = stats.norm.ppf(_plotting_positions(values.size))
     return pd.DataFrame({"theoretical": theoretical, "sample": standardized})
 
 
 @dataclass(frozen=True)
 class StudentTFit:
+    """Maximum-likelihood Student-t parameters: degrees of freedom, location and scale."""
+
     df: float
     loc: float
     scale: float
@@ -130,6 +136,8 @@ def hurst_rs(r: pd.Series, min_window: int = 8) -> float:
 
 @dataclass(frozen=True)
 class GaussianVerdict:
+    """Which Gaussian Kelly assumptions fail, the statistics behind each flag, and a plain message."""
+
     fat_tails: bool
     non_normal: bool
     volatility_clustering: bool
@@ -173,6 +181,8 @@ def gaussian_kelly_verdict(r: pd.Series) -> GaussianVerdict:
 
 @dataclass(frozen=True)
 class DistributionSummary:
+    """Every diagnostic summarize() computes for one return series."""
+
     verdict: GaussianVerdict
     skewness: float
     jarque_bera: tuple[float, float]

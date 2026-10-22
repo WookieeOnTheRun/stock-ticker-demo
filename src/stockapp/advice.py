@@ -24,13 +24,27 @@ MIN_SCORED_FOR_SKILL = 252  # out-of-sample predictions with known outcomes befo
 BANNER = "Educational tool. Not investment advice. Past performance does not predict future results."
 
 
+def skill_established(report: ModelReport) -> bool:
+    """
+    True if the model passes causal_skill_gate on its latest decision date: at least MIN_SCORED_FOR_SKILL
+    out-of-sample predictions with known outcomes, whose cumulative Brier score beats climatology's. This is the
+    same gate the advice rule's walk-forward track record applies on every date, so the live advice never trusts a
+    probability the track record would have ignored. On the latest date every known outcome is counted, so it amounts
+    to report.has_skill plus the minimum count.
+    """
+    skilled = _skill_mask(report.probabilities, report.labels, report.climatology, report.horizon)
+    return bool(skilled[-1]) if skilled.size else False
+
+
 def advice_probability(report: ModelReport) -> float:
-    """The probability the rules act on: the model's latest calibrated p if it has out-of-sample skill, else 0.5."""
-    return report.latest_probability if report.has_skill else NO_SKILL_P
+    """The probability the rules act on: the model's latest calibrated p if skill_established, else 0.5."""
+    return report.latest_probability if skill_established(report) else NO_SKILL_P
 
 
 @dataclass(frozen=True)
 class AdviceInputs:
+    """Everything decide() needs for one ticker on one date."""
+
     p: float
     """Calibrated probability, or 0.5 when the model has no demonstrated skill."""
     kelly_p5: float
@@ -45,6 +59,8 @@ class AdviceInputs:
 
 @dataclass(frozen=True)
 class Advice:
+    """decide()'s output: the action, the new position, each rule clause's outcome and the inputs used."""
+
     action: str
     new_position: float
     clauses: dict[str, bool]
@@ -74,6 +90,7 @@ def decide(inputs: AdviceInputs, p_buy: float = P_BUY, p_sell: float = P_SELL) -
         "BUY: regime is not high-vol": calm,
     }
     if over_target or low_p or high_vol_cut:
+        # Each cap counts only if its clause fired: a list times a bool is the list itself or [].
         caps = [inputs.target] * over_target + [0.0] * low_p + [inputs.dd_kelly] * high_vol_cut
         return Advice("SELL / TRIM", min(inputs.current, *caps), clauses, inputs)
     if edge and high_p and calm:
@@ -83,6 +100,8 @@ def decide(inputs: AdviceInputs, p_buy: float = P_BUY, p_sell: float = P_SELL) -
 
 @dataclass(frozen=True)
 class KellyInputs:
+    """The Kelly quantities the advice rule uses, estimated on one price window."""
+
     target: float
     kelly_p5: float
     dd_kelly: float
@@ -109,6 +128,14 @@ def causal_skill_gate(probabilities: pd.Series, labels: pd.Series, climatology: 
     known on that date (label end <= date), its Brier score beats climatology over at least MIN_SCORED_FOR_SKILL of
     them; otherwise 0.5. This keeps the "no skill -> 0.5" rule free of look-ahead in backtests.
     """
+    skilled = _skill_mask(probabilities, labels, climatology, horizon)
+    return pd.Series(
+        np.where(skilled, probabilities.to_numpy(dtype=float), NO_SKILL_P), index=probabilities.index, name="p_used"
+    )
+
+
+def _skill_mask(probabilities: pd.Series, labels: pd.Series, climatology: pd.Series, horizon: int) -> np.ndarray:
+    """Per decision date, whether the skill gate passes (see causal_skill_gate); shared by both uses of the gate."""
     p = probabilities.to_numpy(dtype=float)
     y = labels.reindex(probabilities.index).to_numpy(dtype=float)
     c = climatology.reindex(probabilities.index).to_numpy(dtype=float)
@@ -119,8 +146,8 @@ def causal_skill_gate(probabilities: pd.Series, labels: pd.Series, climatology: 
     cum_model = pd.Series(np.cumsum(err_model)).shift(horizon).fillna(0.0).to_numpy()
     cum_clim = pd.Series(np.cumsum(err_clim)).shift(horizon).fillna(0.0).to_numpy()
     cum_n = pd.Series(np.cumsum(scored)).shift(horizon).fillna(0.0).to_numpy()
-    skilled = (cum_n >= MIN_SCORED_FOR_SKILL) & (cum_model < cum_clim)
-    return pd.Series(np.where(skilled, p, NO_SKILL_P), index=probabilities.index, name="p_used")
+    skilled: np.ndarray = (cum_n >= MIN_SCORED_FOR_SKILL) & (cum_model < cum_clim)
+    return skilled
 
 
 def rule_strategy(
@@ -138,10 +165,12 @@ def rule_strategy(
     """
 
     def estimate(train_prices: pd.Series, train_rf: pd.Series) -> Params:
+        """Kelly inputs from the training window, frozen for the test year."""
         k = kelly_inputs(train_prices, train_rf, k_fraction, prior_sd_annual, max_dd)
         return {"target": k.target, "kelly_p5": k.kelly_p5, "dd_kelly": k.dd_kelly}
 
     def positions(prices: pd.Series, params: Params) -> pd.Series:
+        """Apply decide() at every close; on HOLD the previous day's position carries over."""
         regimes = vol_regimes(prices.pct_change())
         p = p_used.reindex(prices.index).fillna(NO_SKILL_P).to_numpy()
         labels = regimes.to_numpy()

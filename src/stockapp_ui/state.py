@@ -91,4 +91,5 @@ def apply_settings(settings: dict[str, object]) -> None:
 
 
 def reset_to_defaults() -> None:
+    """Restore every shared setting to DEFAULTS; call from a widget callback, like apply_settings."""
     apply_settings(dict(DEFAULTS))

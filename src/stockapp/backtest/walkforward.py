@@ -1,3 +1,5 @@
+"""Walk-forward evaluation: fold dates, per-fold parameter selection and the stitched out-of-sample backtest."""
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -15,6 +17,8 @@ TRIALS_CAPTION = "More trials make it likelier that the best result is luck."
 
 @dataclass(frozen=True)
 class Fold:
+    """One fold: its dates, the parameters chosen on its training window and their training metrics."""
+
     train_start: pd.Timestamp
     train_end: pd.Timestamp
     """Last training date; parameters are chosen at this close and first applied to the next day's return."""
@@ -26,6 +30,8 @@ class Fold:
 
 @dataclass(frozen=True)
 class WalkForwardResult:
+    """Everything walk_forward produces for one strategy."""
+
     strategy: str
     out_of_sample: BacktestResult
     """Stitched test-year segments: every day's position was decided with parameters chosen on earlier data."""

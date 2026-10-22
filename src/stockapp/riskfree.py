@@ -1,3 +1,5 @@
+"""Risk-free rate: the ^IRX T-bill yield, its daily equivalent, and causal alignment to trading dates."""
+
 import pandas as pd
 
 from stockapp.repository import load_bars

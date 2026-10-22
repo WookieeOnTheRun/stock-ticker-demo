@@ -1,3 +1,5 @@
+"""Exchange calendars by ticker suffix: trading sessions per year (for annualization) and stale-data checks."""
+
 from datetime import date, timedelta
 from functools import lru_cache
 
@@ -36,6 +38,7 @@ def calendar_code(ticker: str) -> str | None:
 
 @lru_cache(maxsize=16)
 def _calendar(code: str) -> xcals.ExchangeCalendar:
+    """The exchange_calendars calendar for a code, cached so each one is built once per process."""
     return xcals.get_calendar(code)
 
 
@@ -60,5 +63,6 @@ def is_stale(ticker: str, last_bar: date, today: date) -> bool:
         return (today - last_bar).days > STALE_FALLBACK_DAYS
     cal = _calendar(code)
     ts = min(pd.Timestamp(today), cal.last_session)
+    # The last session before today: today's previous session, or the latest session if today isn't one.
     previous = cal.previous_session(ts) if cal.is_session(ts) else cal.date_to_session(ts, direction="previous")
     return bool(pd.Timestamp(last_bar) < previous)

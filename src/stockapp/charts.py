@@ -1,3 +1,5 @@
+"""Plotly figure builders for every page: pure functions of their inputs, with no Streamlit calls."""
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -62,6 +64,7 @@ def price_chart(close: pd.Series, actions: pd.DataFrame | None = None, dividend_
 
 
 def returns_histogram(returns_df: pd.DataFrame) -> go.Figure:
+    """Histogram of the daily simple returns (column simple_return), 50 bins."""
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=returns_df["simple_return"], nbinsx=50, name="Simple Returns"))
     fig.update_layout(title="Daily Return Distribution", xaxis_title="Return", yaxis_title="Count")
@@ -69,6 +72,7 @@ def returns_histogram(returns_df: pd.DataFrame) -> go.Figure:
 
 
 def cumulative_return_chart(returns_df: pd.DataFrame) -> go.Figure:
+    """Growth of $1 from compounding the daily simple returns (column simple_return)."""
     cum = (1 + returns_df["simple_return"]).cumprod()
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=cum.index, y=cum.values, mode="lines", name="Cumulative Return"))

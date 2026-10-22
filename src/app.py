@@ -1,4 +1,4 @@
-"""Router: page config, shared state and sidebar, then the selected page. Pages live in src/pages/."""
+"""Router: page config, shared state and sidebar, then the selected page. Page scripts live in src/app_pages/."""
 
 import streamlit as st
 

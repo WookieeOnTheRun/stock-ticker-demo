@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stockapp.advice import BANNER, AdviceInputs, advice_probability, decide, kelly_inputs
+from stockapp.advice import BANNER, AdviceInputs, advice_probability, decide, kelly_inputs, skill_established
 from stockapp.fx import convert_prices, fx_ticker, major_currency
 from stockapp.model.probability import walk_forward_model
 from stockapp.portfolio_input import MAX_UPLOAD_BYTES, WatchlistError, parse_watchlist_csv
@@ -37,11 +37,14 @@ BASE_CURRENCY = "USD"
 
 @dataclass(frozen=True)
 class ScanRow:
+    """One ticker's line in the scan report and the JSON file."""
+
     ticker: str
     action: str
     target: float | None
     p: float | None
     model_has_skill: bool | None
+    """Whether the model passed the advice skill gate (advice.skill_established); if not, p is 0.5."""
     regime: str | None
     note: str = ""
 
@@ -70,13 +73,14 @@ def scan_ticker(
     regimes = vol_regimes(prices.pct_change()).dropna()
     regime = str(regimes.iloc[-1]) if len(regimes) else None
     advice = decide(AdviceInputs(p, kelly.kelly_p5, kelly.target, regime, kelly.dd_kelly, current))
-    return ScanRow(ticker, advice.action, round(advice.new_position, 4), round(p, 4), report.has_skill, regime)
+    return ScanRow(ticker, advice.action, round(advice.new_position, 4), round(p, 4), skill_established(report), regime)
 
 
 def render_html(rows: list[ScanRow], generated: str) -> str:
     """A standalone HTML table of scan results; every value is HTML-escaped."""
 
     def cell(value: object) -> str:
+        """One escaped table cell: floats as percentages, None as empty."""
         text = "" if value is None else f"{value:.2%}" if isinstance(value, float) else str(value)
         return f"<td>{html.escape(text)}</td>"
 
@@ -117,6 +121,7 @@ def send_alert(changes: list[ScanRow], env: dict[str, str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point. Exit codes: 0 done, 2 unreadable or invalid watchlist, 3 --email without SMTP settings."""
     parser = argparse.ArgumentParser(prog="python -m stockapp.scan", description=__doc__.split("\n\n")[0])
     parser.add_argument("--watchlist", required=True, type=Path, help="CSV with a 'ticker' column (optional weight)")
     parser.add_argument("--out", required=True, type=Path, help="HTML report path; a .json file is written alongside")

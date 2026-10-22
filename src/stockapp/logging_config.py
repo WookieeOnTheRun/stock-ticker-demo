@@ -13,16 +13,19 @@ from datetime import UTC, datetime
 REDACT_MARKERS = ("key", "token", "secret", "password")
 REDACTED = "[REDACTED]"
 USER_PREFIX = 8
+# Attributes every LogRecord has; any other attribute came from `extra=` and is logged as its own field.
 _STANDARD = set(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {"message", "asctime", "taskName"}
 _configured = False
 
 
 def _is_secret_name(name: str) -> bool:
+    """True if a field name contains any of REDACT_MARKERS, ignoring case."""
     lowered = name.lower()
     return any(marker in lowered for marker in REDACT_MARKERS)
 
 
 def _jsonable(value: object) -> object:
+    """JSON scalars unchanged; anything else as its str()."""
     if isinstance(value, str | int | float | bool) or value is None:
         return value
     return str(value)

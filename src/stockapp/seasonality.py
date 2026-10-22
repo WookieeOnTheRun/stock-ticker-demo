@@ -1,3 +1,5 @@
+"""Calendar seasonality: a year x month return table and the average return per calendar month."""
+
 import pandas as pd
 
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]

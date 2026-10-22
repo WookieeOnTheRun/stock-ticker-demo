@@ -41,7 +41,7 @@ from stockapp_ui.cache import (
     risk_cached,
     sector_cached,
 )
-from stockapp_ui.context import build_context
+from stockapp_ui.context import build_context, user_message
 from stockapp_ui.state import METHODS
 
 WINDOW_SIZES = [60, 120, 252, 504]
@@ -51,6 +51,7 @@ MIN_FACTOR_DAYS = 60
 
 
 def render() -> None:
+    """Render the page: chart tabs, Kelly breakdown, Kelly across windows, data download and the HTML report."""
     ctx = build_context()
     k_fraction_key, max_dd_pct_key = ctx.k_fraction, ctx.max_dd_pct
     ticker = ctx.ticker
@@ -88,6 +89,7 @@ def render() -> None:
     page_key = (ticker, last_date, ctx.settings_key, method, k_fraction_key, prior_sd_annual, max_dd_pct_key, benchmark)
 
     def chart(name: str, build: Callable[[], go.Figure], *extra: object) -> None:
+        """Show the figure memoized under (name, page_key, *extra); build() runs only on a cache miss."""
         st.plotly_chart(cache.figure(name, (*page_key, *extra), build))
 
     # Charts
@@ -239,7 +241,7 @@ def render() -> None:
             factor_data = factors_cached()
         except Exception as e:
             factor_data = None
-            st.info(f"Factor data is unavailable right now ({e}).")
+            st.info(f"Factor data is unavailable right now ({user_message(e)}).")
         if factor_data is not None:
             through = str(factor_data.index[-1].date())
             st.caption(f"Factor data through {through} (the library lags by several weeks).")

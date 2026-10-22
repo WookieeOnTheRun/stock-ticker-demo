@@ -1,7 +1,8 @@
 """
-Per-user saved watchlists and settings in SQLite (data/users.sqlite). Users are keyed only by sub_hash, the
-sha256(app_salt + sub) digest; no raw identity claim is ever stored. Every JSON payload is validated against an
-explicit schema on write and again on read, and anything else is rejected.
+Per-user saved watchlists and settings in SQLite (data/users.sqlite). Users are keyed only by sub_hash, a keyed
+digest of the provider's issuer and subject claims (stockapp_ui.auth.hash_subject); no raw identity claim is ever
+stored. Every JSON payload is validated against an explicit schema on write and again on read, and anything else is
+rejected.
 """
 
 import json
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS watchlists (
 );
 CREATE TABLE IF NOT EXISTS settings (sub_hash TEXT PRIMARY KEY, settings_json TEXT NOT NULL, updated_utc TEXT NOT NULL);
 """
+USER_TABLES = ("watchlists", "settings", "users")  # every table keyed by sub_hash
 
 
 class UserDataError(ValueError):
@@ -42,6 +44,7 @@ class UserDataError(ValueError):
 
 
 def _ticker(value: object) -> bool:
+    """True if value is a string already in normalize_ticker's canonical form."""
     return isinstance(value, str) and normalize_ticker(value) == value
 
 
@@ -49,6 +52,8 @@ Validator = Callable[[object], bool]
 
 
 def _number(lo: float, hi: float, integer: bool = False) -> Validator:
+    """Validator for an int or float in [lo, hi]; bools are rejected, and with integer=True so are fractions."""
+
     def check(value: object) -> bool:
         if isinstance(value, bool) or not isinstance(value, int | float):
             return False
@@ -60,6 +65,7 @@ def _number(lo: float, hi: float, integer: bool = False) -> Validator:
 
 
 def _choice(options: tuple[str, ...]) -> Validator:
+    """Validator for a string from a fixed set of options."""
     return lambda value: isinstance(value, str) and value in options
 
 
@@ -79,6 +85,7 @@ SETTINGS_SCHEMA: dict[str, Validator] = {
 
 
 def validate_sub_hash(sub_hash: str) -> str:
+    """sub_hash itself if it is a 64-character lowercase hex digest; UserDataError otherwise."""
     if not isinstance(sub_hash, str) or not SUB_HASH.fullmatch(sub_hash):
         raise UserDataError("Invalid user key.")
     return sub_hash
@@ -111,12 +118,14 @@ def validate_settings(settings: object) -> dict[str, object]:
 
 
 def validate_name(name: str) -> str:
+    """name itself if it matches WATCHLIST_NAME; UserDataError otherwise."""
     if not isinstance(name, str) or not WATCHLIST_NAME.fullmatch(name):
         raise UserDataError("Watchlist names are 1-40 letters, digits, spaces, '.', '_' or '-'.")
     return name
 
 
 def _now() -> str:
+    """The current UTC time in ISO 8601, to the second."""
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
@@ -124,10 +133,12 @@ class UserStore:
     """SQLite store for per-user data: WAL mode, one connection per call, parameterized queries only."""
 
     def __init__(self, path: Path | None = None) -> None:
+        """Use the database at path (default data/users.sqlite), which must resolve inside config.DATA_DIR."""
         self.path = resolve_db_path(path if path is not None else config.DATA_DIR / USERS_DB_FILE)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
+        """A new connection with WAL mode and the schema in place, closed on exit; writers wrap it in `with conn`."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=30)
         try:
@@ -139,13 +150,18 @@ class UserStore:
 
     @staticmethod
     def _ensure_user(conn: sqlite3.Connection, sub_hash: str) -> None:
+        """Create the user's row on their first save; a no-op afterwards."""
         conn.execute("INSERT OR IGNORE INTO users (sub_hash, created_utc) VALUES (?, ?)", (sub_hash, _now()))
 
     def save_watchlist(self, sub_hash: str, name: str, tickers: list[str]) -> None:
+        """Create or replace a named watchlist. A user has at most MAX_WATCHLISTS; replacing one doesn't add to it."""
         validate_sub_hash(sub_hash)
         validate_name(name)
         payload = json.dumps(validate_tickers(tickers))
         with self._connect() as conn, conn:
+            # sqlite3 only opens a transaction at the first write, so take the write lock now: otherwise two concurrent
+            # saves could both pass the limit check below before either inserts.
+            conn.execute("BEGIN IMMEDIATE")
             count = conn.execute("SELECT COUNT(*) FROM watchlists WHERE sub_hash = ?", (sub_hash,)).fetchone()[0]
             exists = conn.execute(
                 "SELECT 1 FROM watchlists WHERE sub_hash = ? AND name = ?", (sub_hash, name)
@@ -161,6 +177,7 @@ class UserStore:
             )
 
     def list_watchlists(self, sub_hash: str) -> list[str]:
+        """The user's watchlist names, alphabetically."""
         validate_sub_hash(sub_hash)
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM watchlists WHERE sub_hash = ? ORDER BY name", (sub_hash,)).fetchall()
@@ -182,11 +199,13 @@ class UserStore:
             raise UserDataError("Saved watchlist is corrupt.") from exc
 
     def delete_watchlist(self, sub_hash: str, name: str) -> None:
+        """Delete one of the user's watchlists; no error if it doesn't exist."""
         validate_sub_hash(sub_hash)
         with self._connect() as conn, conn:
             conn.execute("DELETE FROM watchlists WHERE sub_hash = ? AND name = ?", (sub_hash, name))
 
     def save_settings(self, sub_hash: str, settings: dict[str, object]) -> None:
+        """Validate and store the user's settings, replacing any saved before."""
         validate_sub_hash(sub_hash)
         payload = json.dumps(validate_settings(settings), sort_keys=True)
         with self._connect() as conn, conn:
@@ -211,6 +230,7 @@ class UserStore:
             raise UserDataError("Saved settings are corrupt.") from exc
 
     def reset_settings(self, sub_hash: str) -> None:
+        """Delete the user's saved settings (their watchlists are kept)."""
         validate_sub_hash(sub_hash)
         with self._connect() as conn, conn:
             conn.execute("DELETE FROM settings WHERE sub_hash = ?", (sub_hash,))
@@ -219,5 +239,28 @@ class UserStore:
         """Remove every row for this user from every table, in one transaction."""
         validate_sub_hash(sub_hash)
         with self._connect() as conn, conn:
-            for table in ("watchlists", "settings", "users"):
+            for table in USER_TABLES:
                 conn.execute(f"DELETE FROM {table} WHERE sub_hash = ?", (sub_hash,))  # noqa: S608 - fixed table names
+
+    def migrate_user(self, old_hash: str, new_hash: str) -> bool:
+        """
+        Move every row stored under old_hash to new_hash, in one transaction, and return True if anything moved.
+        Nothing moves if old_hash has no rows, or if new_hash already has any: two users' data is never merged.
+        """
+        validate_sub_hash(old_hash)
+        validate_sub_hash(new_hash)
+        if old_hash == new_hash:
+            return False
+        with self._connect() as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")  # check and move under one write lock, so no concurrent save interleaves
+            if not self._has_rows(conn, old_hash) or self._has_rows(conn, new_hash):
+                return False
+            for table in USER_TABLES:
+                conn.execute(f"UPDATE {table} SET sub_hash = ? WHERE sub_hash = ?", (new_hash, old_hash))  # noqa: S608 - fixed table names
+            return True
+
+    @staticmethod
+    def _has_rows(conn: sqlite3.Connection, sub_hash: str) -> bool:
+        """True if any table holds a row for sub_hash."""
+        query = " UNION ALL ".join(f"SELECT 1 FROM {table} WHERE sub_hash = ?" for table in USER_TABLES)  # noqa: S608 - fixed table names
+        return conn.execute(query, (sub_hash,) * len(USER_TABLES)).fetchone() is not None

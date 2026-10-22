@@ -5,17 +5,25 @@ session's recent data-fetch events, tagged by the session that ran them.
 
 import logging
 import os
-from collections import defaultdict, deque
+import threading
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 MAX_EVENTS = 200
+MAX_SESSIONS = 500
+"""
+Sessions tracked at once. Streamlit doesn't tell us when a session ends, so without a cap every session ever seen
+would stay in memory for the life of the server; past the cap the least recently active session is dropped.
+"""
 
 
 @dataclass(frozen=True)
 class FetchEvent:
+    """One data_fetch log event: ticker, cache outcome and duration."""
+
     ticker: str
     cache: str
     duration_ms: float
@@ -26,9 +34,11 @@ class SessionFetchHandler(logging.Handler):
 
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
-        self.events: dict[str, deque[FetchEvent]] = defaultdict(lambda: deque(maxlen=MAX_EVENTS))
+        self.events: OrderedDict[str, deque[FetchEvent]] = OrderedDict()
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Record a data_fetch event under the current session; other records and non-session threads are ignored."""
+        # logging.Handler.handle holds this handler's lock around emit, so emits never interleave.
         if getattr(record, "event", None) != "data_fetch":
             return
         ctx = get_script_run_ctx(suppress_warning=True)
@@ -39,32 +49,43 @@ class SessionFetchHandler(logging.Handler):
             cache=str(getattr(record, "cache", "")),
             duration_ms=float(getattr(record, "duration_ms", 0.0)),
         )
-        self.events[ctx.session_id].append(event)
+        events = self.events.setdefault(ctx.session_id, deque(maxlen=MAX_EVENTS))
+        self.events.move_to_end(ctx.session_id)
+        events.append(event)
+        while len(self.events) > MAX_SESSIONS:
+            self.events.popitem(last=False)
 
 
-_session_users: dict[str, str] = {}
+_session_users: OrderedDict[str, str] = OrderedDict()
+_session_users_lock = threading.Lock()  # set_session_user runs on every session's script thread
 
 
 class SessionUserFilter(logging.Filter):
     """Adds the current session's hashed user id (if signed in) to records that don't carry one."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Tag the record with the session's user hash if it has none; never drops a record."""
         if not getattr(record, "user", None):
             ctx = get_script_run_ctx(suppress_warning=True)
-            if ctx is not None and ctx.session_id in _session_users:
-                record.user = _session_users[ctx.session_id]
+            user = _session_users.get(ctx.session_id) if ctx is not None else None
+            if user:
+                record.user = user
         return True
 
 
 def set_session_user(sub_hash: str | None) -> None:
-    """Record (or clear) the signed-in user's hash for the current session's log lines."""
+    """Record (or clear) the signed-in user's hash for the current session's log lines (at most MAX_SESSIONS kept)."""
     ctx = get_script_run_ctx(suppress_warning=True)
     if ctx is None:
         return
-    if sub_hash:
-        _session_users[ctx.session_id] = sub_hash
-    else:
-        _session_users.pop(ctx.session_id, None)
+    with _session_users_lock:
+        if sub_hash:
+            _session_users[ctx.session_id] = sub_hash
+            _session_users.move_to_end(ctx.session_id)
+            while len(_session_users) > MAX_SESSIONS:
+                _session_users.popitem(last=False)
+        else:
+            _session_users.pop(ctx.session_id, None)
 
 
 _handler: SessionFetchHandler | None = None
@@ -82,6 +103,7 @@ def install() -> None:
 
 
 def session_events() -> list[FetchEvent]:
+    """The current session's recorded fetch events, oldest first ([] outside a session or before install())."""
     ctx = get_script_run_ctx(suppress_warning=True)
     if _handler is None or ctx is None:
         return []
@@ -89,10 +111,12 @@ def session_events() -> list[FetchEvent]:
 
 
 def enabled() -> bool:
+    """True when the DEBUG_UI environment variable is "1"."""
     return os.environ.get("DEBUG_UI") == "1"
 
 
 def app_version() -> str:
+    """The installed stockapp package version, or "unknown"."""
     try:
         return version("stockapp")
     except PackageNotFoundError:

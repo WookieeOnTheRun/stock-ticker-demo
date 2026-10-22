@@ -1,6 +1,9 @@
+"""Block-bootstrap bands for the constrained Kelly weights, run within a time budget."""
+
 import time
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from stockapp.bootstrap import SEED, block_bootstrap_indices
@@ -17,17 +20,27 @@ BLOCK_WEEKLY = 4  # about a month of weeks
 
 @dataclass(frozen=True)
 class WeightBands:
+    """Per-ticker 5th / 50th / 95th percentile weights across the bootstrap resamples the optimizer solved."""
+
     p5: pd.Series
     p50: pd.Series
     p95: pd.Series
+    """Percentiles are NaN if no resample was solved."""
     resamples: int
+    """Resamples run (solved or not)."""
     requested: int
-    fallbacks: int
-    """Resamples where the optimizer failed and equal weight was used."""
+    failures: int
+    """Resamples the optimizer failed on; they are left out of the percentiles."""
 
     @property
     def reduced(self) -> bool:
+        """True if the time budget stopped the bootstrap short of the requested resamples."""
         return self.resamples < self.requested
+
+    @property
+    def solved(self) -> int:
+        """Resamples behind the percentiles."""
+        return self.resamples - self.failures
 
 
 def bootstrap_weights(
@@ -45,13 +58,15 @@ def bootstrap_weights(
     preserved), re-estimate mu and Sigma and re-solve the constrained Kelly problem on each resample, and report each
     weight's 5th / 50th / 95th percentile. Blocks are 20 periods for daily data and 4 for weekly. Resamples 2 to
     PILOT_RESAMPLES + 1 are timed (the first one includes one-off solver set-up); if the full count would exceed
-    time_budget_s, fewer resamples are run (at least MIN_RESAMPLES) and `reduced` is True.
+    time_budget_s, fewer resamples are run (at least MIN_RESAMPLES) and `reduced` is True. Resamples the optimizer
+    fails on are counted in `failures` and left out of the percentiles, so a failure never shifts the bands.
     """
     values = excess.dropna()
     block = BLOCK_WEEKLY if periods_per_year < 100 else BLOCK_DAILY
     idx = block_bootstrap_indices(len(values), n_resamples=n_resamples, block=block, seed=seed)
     matrix = values.to_numpy(dtype=float)
-    weights, fallbacks = [], 0
+    weights: list[np.ndarray] = []
+    resamples = failures = 0
     target = n_resamples
     start = time.perf_counter()
     for k in range(n_resamples):
@@ -65,14 +80,18 @@ def bootstrap_weights(
         sample = pd.DataFrame(matrix[idx[k]], columns=values.columns)
         est = estimate(sample, prior_sd_annual, periods_per_year, diagnostics=False)
         allocation = solver.solve(est.mu, est.sigma, c)
-        fallbacks += allocation.fallback
-        weights.append(allocation.weights)
-    frame = pd.DataFrame(weights, columns=values.columns)
+        resamples += 1
+        if allocation.weights is None:
+            failures += 1
+        else:
+            weights.append(allocation.weights)
+    # Shaped explicitly so that with no solved resample the frame is still float, and its percentiles are NaN.
+    frame = pd.DataFrame(np.reshape(weights, (len(weights), len(values.columns))), columns=values.columns)
     return WeightBands(
         p5=frame.quantile(0.05),
         p50=frame.quantile(0.50),
         p95=frame.quantile(0.95),
-        resamples=len(frame),
+        resamples=resamples,
         requested=n_resamples,
-        fallbacks=fallbacks,
+        failures=failures,
     )

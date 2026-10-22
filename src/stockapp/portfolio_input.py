@@ -1,3 +1,5 @@
+"""Watchlist input: typed tickers and uploaded CSVs, validated, and holdings converted to weights."""
+
 import io
 import re
 from dataclasses import dataclass
@@ -19,6 +21,8 @@ class WatchlistError(ValueError):
 
 @dataclass(frozen=True)
 class Watchlist:
+    """Validated tickers and, optionally, current holdings as weights or as share counts."""
+
     tickers: list[str]
     weights: dict[str, float] | None = None
     """Current holdings as portfolio weights (fractions; the rest is cash)."""
@@ -27,6 +31,7 @@ class Watchlist:
 
 
 def _validate_tickers(raw: list[str]) -> list[str]:
+    """Normalized, de-duplicated tickers in input order; WatchlistError names up to 5 invalid ones."""
     tickers, invalid = [], []
     for item in raw:
         ticker = normalize_ticker(item)
@@ -55,6 +60,7 @@ def parse_watchlist_csv(data: bytes) -> Watchlist:
     """
     if len(data) > MAX_UPLOAD_BYTES:
         raise WatchlistError(f"The file is larger than {MAX_UPLOAD_BYTES // 1024} KB.")
+    # Read the header alone first, so the columns are checked before any data is parsed with typed dtypes.
     try:
         header = pd.read_csv(io.BytesIO(data), nrows=0)
     except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as exc:
@@ -74,7 +80,7 @@ def parse_watchlist_csv(data: bytes) -> Watchlist:
             io.BytesIO(data),
             usecols=lambda c: str(c).strip().lower() in columns,
             dtype={c: COLUMN_DTYPES[str(c).strip().lower()] for c in header.columns},
-            nrows=MAX_TICKERS + 1,
+            nrows=MAX_TICKERS + 1,  # one extra row reveals an over-long file without parsing all of it
         )
     except (ValueError, pd.errors.ParserError) as exc:
         raise WatchlistError("Could not read the CSV: weight and shares must be numbers.") from exc
@@ -85,6 +91,7 @@ def parse_watchlist_csv(data: bytes) -> Watchlist:
     tickers = _validate_tickers([str(t) for t in frame["ticker"]])
     normalized = [normalize_ticker(str(t)) for t in frame["ticker"]]
     holdings: dict[str, float] = {}
+    # At most one of weight / shares is present (checked above); duplicate tickers' holdings are summed.
     for column in ("weight", "shares"):
         if column in frame:
             values = frame[column].fillna(0.0)

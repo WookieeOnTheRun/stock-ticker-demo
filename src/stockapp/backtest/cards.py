@@ -1,3 +1,5 @@
+"""Signal cards: each registered signal's walk-forward out-of-sample record beside the buy-and-hold baselines."""
+
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -10,6 +12,8 @@ RunWalkForward = Callable[[str], WalkForwardResult]
 
 @dataclass(frozen=True)
 class SignalCards:
+    """The signal-card table and the total number of parameter combinations behind it."""
+
     table: pd.DataFrame
     """One row per signal, sorted by out-of-sample Sharpe (best first); losers are never dropped."""
     trials: int

@@ -60,11 +60,13 @@ TEMPLATE = """<!doctype html>
 </html>
 """
 
-_ENV = Environment(autoescape=True)
+_TEMPLATE = Environment(autoescape=True).from_string(TEMPLATE)  # compiled once per process, not per report
 
 
 @dataclass
 class ReportTable:
+    """One table in the report; cells are already formatted strings."""
+
     title: str
     columns: list[str]
     rows: list[list[str]]
@@ -74,6 +76,8 @@ class ReportTable:
 
 @dataclass
 class ReportData:
+    """Everything build_report renders for one ticker."""
+
     ticker: str
     data_through: str
     currency: str
@@ -89,7 +93,7 @@ def build_report(data: ReportData, generated: datetime | None = None) -> str:
     for i, (title, fig) in enumerate(data.figures.items()):
         markup = pio.to_html(fig, include_plotlyjs=i == 0, full_html=False)
         charts.append({"title": title, "html": Markup(markup)})  # noqa: S704 - Plotly's own figure HTML
-    html = _ENV.from_string(TEMPLATE).render(
+    html = _TEMPLATE.render(
         ticker=data.ticker,
         generated=(generated or datetime.now(UTC)).isoformat(timespec="seconds"),
         data_through=data.data_through,

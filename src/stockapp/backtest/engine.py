@@ -1,3 +1,5 @@
+"""Vectorized daily backtest of a target-weight series, with transaction costs and performance metrics."""
+
 import math
 from dataclasses import dataclass
 
@@ -13,6 +15,8 @@ DEFAULT_COST_BPS = 5.0  # per side, charged on every change in position
 
 @dataclass(frozen=True)
 class BacktestResult:
+    """Output of run_backtest: equity curve, daily returns, positions held, turnover and metrics."""
+
     equity: pd.Series
     """Growth of 1, starting at 1.0 on the first price date."""
     returns: pd.Series

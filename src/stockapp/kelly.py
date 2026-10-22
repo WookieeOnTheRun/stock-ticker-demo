@@ -1,13 +1,18 @@
+"""Tier 0 single-asset Kelly estimators: Gaussian, shrunk (normal-normal posterior mean) and log-optimal."""
+
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 TRADING_DAYS = 252
+LOG_OPTIMAL_CHUNK = 64  # grid fractions evaluated per block in log_optimal_kelly (bounds its memory use)
 
 
 @dataclass
 class KellyResult:
+    """Gaussian Kelly: mean, variance and stdev of the returns used, raw f*, the fraction and the applied f."""
+
     mean_return: float
     variance: float
     stdev: float
@@ -81,7 +86,8 @@ def log_optimal_kelly(r: pd.Series, rf: pd.Series, f_max: float = 10.0, step: fl
 
     No Gaussian assumption: the sample's actual tails enter through the log, so the gap between this
     and the mean/variance Kelly is the fat-tail penalty. Any f for which some day has 1 + R_f <= 0
-    (total loss) is infeasible and skipped. The grid is evaluated as one (grid x observations) array.
+    (total loss) is infeasible and skipped. The grid is evaluated in blocks of LOG_OPTIMAL_CHUNK fractions,
+    each as one (block x observations) array, so peak memory stays a few MB however long the history is.
     Returns the unclamped value as a diagnostic; clamp it only when computing an applied fraction.
     """
     rf_aligned = rf.reindex(r.index)
@@ -91,8 +97,15 @@ def log_optimal_kelly(r: pd.Series, rf: pd.Series, f_max: float = 10.0, step: fl
     if r_arr.size == 0:
         return 0.0
     grid = np.linspace(0.0, f_max, int(round(f_max / step)) + 1)
-    port = rf_arr[None, :] + grid[:, None] * (r_arr - rf_arr)[None, :]
-    feasible = (1.0 + port > 0.0).all(axis=1)
-    log_growth = np.log1p(port, out=np.full_like(port, -np.inf), where=1.0 + port > 0.0)
-    mean_growth = np.where(feasible, log_growth.mean(axis=1), -np.inf)
+    excess = r_arr - rf_arr
+    mean_growth = np.full(grid.size, -np.inf)
+    for start in range(0, grid.size, LOG_OPTIMAL_CHUNK):
+        chunk = grid[start : start + LOG_OPTIMAL_CHUNK]
+        port = rf_arr[None, :] + chunk[:, None] * excess[None, :]
+        feasible = (1.0 + port > 0.0).all(axis=1)
+        if not feasible.any():
+            # 1 + rf + f * e falls as f grows on every day with e < 0, so once a fraction is infeasible every
+            # larger one is too: the rest of the grid can be skipped.
+            break
+        mean_growth[start : start + chunk.size][feasible] = np.log1p(port[feasible]).mean(axis=1)
     return float(grid[int(np.argmax(mean_growth))])

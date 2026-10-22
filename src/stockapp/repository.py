@@ -1,3 +1,5 @@
+"""Cached market data access: bars served from SQLite and refreshed from the provider incrementally."""
+
 import logging
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -68,6 +70,7 @@ def _incremental_update(provider: PriceProvider, store: Store, ticker: str, log:
     old = cached.loc[comparable, "adj_close"]
     new = fresh.loc[comparable, "adj_close"]
     relative_diff = ((new - old).abs() / old.abs()).max() if len(comparable) else float("inf")
+    # Written as "not <=" so a NaN difference (0 / 0) also triggers a full refetch, as does inf (no overlap).
     if not relative_diff <= RESTATEMENT_TOLERANCE:
         logger.info(
             "Restatement detected for %s (max relative adj_close change %.3g on %d overlapping days); "

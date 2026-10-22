@@ -1,3 +1,5 @@
+"""Volatility regimes: causal rolling-volatility labels, a full-sample HMM view, and Kelly per regime."""
+
 import numpy as np
 import pandas as pd
 
@@ -52,7 +54,8 @@ def kelly_by_regime(r: pd.Series, rf: pd.Series, labels: pd.Series, prior_sd_ann
     """
     rows = []
     known = labels.dropna()
-    for regime in [name for name in REGIME_ORDER if name in set(known)]:
+    present = set(known)
+    for regime in [name for name in REGIME_ORDER if name in present]:
         days = known.index[known == regime]
         r_regime = r.reindex(days).dropna()
         rows.append(

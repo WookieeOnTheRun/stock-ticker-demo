@@ -1,3 +1,5 @@
+"""Strategy definition, the buy-and-hold baselines and the Tier 0 Kelly estimators they size positions with."""
+
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
@@ -31,6 +33,7 @@ class Strategy:
 
 
 def _constant(prices: pd.Series, params: Params) -> pd.Series:
+    """Constant target weight params["fraction"] (default 1.0, fully invested) at every close."""
     return pd.Series(float(params.get("fraction", 1.0)), index=prices.index, name="position")
 
 
@@ -63,6 +66,7 @@ def kelly_buy_and_hold(
     """
 
     def estimate(train_prices: pd.Series, train_rf: pd.Series) -> Params:
+        """Applied fraction from the training window's returns; days without an rf value count as rf = 0."""
         r = train_prices.pct_change().dropna()
         raw = raw_kelly(method, r, train_rf.reindex(r.index).fillna(0.0), prior_sd_annual, max_dd)
         return {"fraction": max(0.0, min(k_fraction * raw, 1.0))}

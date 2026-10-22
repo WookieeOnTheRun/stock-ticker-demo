@@ -1,3 +1,8 @@
+"""Typed market data errors. Their messages are shown to end users as they are (stockapp_ui.context.user_message),
+so they must never include credentials, file paths or raw upstream responses.
+"""
+
+
 class DataError(Exception):
     """Base class for market data errors."""
 

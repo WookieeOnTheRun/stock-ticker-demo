@@ -38,11 +38,13 @@ def _analyze(
     sectors: tuple[str | None, ...],
     _data: ReturnsData,
 ) -> PortfolioAnalysis:
+    """Cached analyze_portfolio: `key` stands for _data (which isn't hashed); the rest are optimizer settings."""
     caps = {s: sector_cap for s in set(sectors) if s} if sector_cap is not None else None
     return analyze_portfolio(_data, prior, c, w_max, gross_max, caps, list(sectors))
 
 
 def _sectors(tickers: list[str], lookup: SectorLookup) -> tuple[str | None, ...]:
+    """Sector per ticker; a failed lookup gives None, so that ticker is simply not sector-capped."""
     found: list[str | None] = []
     for ticker in tickers:
         try:
@@ -53,6 +55,7 @@ def _sectors(tickers: list[str], lookup: SectorLookup) -> tuple[str | None, ...]
 
 
 def _watchlist_input() -> Watchlist | None:
+    """The typed or uploaded watchlist, or None if there is none yet or it is invalid (the error is shown)."""
     source = st.radio("Watchlist", ["Type tickers", "Upload CSV"], horizontal=True, key="pf_source")
     if source == "Type tickers":
         text = st.text_area(
@@ -79,11 +82,14 @@ def _watchlist_input() -> Watchlist | None:
         return None
 
 
-def _risk_free(daily_rf: DailyRf) -> pd.Series | None:
-    """Daily T-bill rate, or a constant manual rate entered here if the T-bill fetch failed."""
+def _risk_free(daily_rf: DailyRf) -> tuple[pd.Series, str] | None:
+    """
+    Daily T-bill rate, or a constant manual rate entered here if the T-bill fetch failed, with a short label of
+    which one is in use (part of the analysis cache key, so changing the manual rate recomputes the analysis).
+    """
     rf = daily_rf()
     if rf is not None:
-        return rf
+        return rf, "irx"
     st.warning("Couldn't fetch the T-bill rate. Enter a risk-free rate; a manual rate is in use.")
     manual = st.number_input(
         "Annual risk-free rate (%)", min_value=0.0, max_value=20.0, value=None, step=0.1, format="%.2f", key="pf_rf"
@@ -91,10 +97,11 @@ def _risk_free(daily_rf: DailyRf) -> pd.Series | None:
     if manual is None:
         return None
     index = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=252 * 60)
-    return pd.Series((1 + manual / 100) ** (1 / 252) - 1, index=index)
+    return pd.Series((1 + manual / 100) ** (1 / 252) - 1, index=index), f"manual {manual:g}"
 
 
 def render() -> None:
+    """Render the page: watchlist, prices in the base currency, risk-free rate, frequency, then the analysis."""
     load_in_base: LoadInBase = cache.load_in_base
     daily_rf: DailyRf = cache.portfolio_daily_rf
     sector_lookup: SectorLookup = cache.sector_cached
@@ -141,11 +148,14 @@ def render() -> None:
     if holdings_value is not None:
         st.caption(f"Holdings value from shares × latest prices: {holdings_value:,.2f} {base_currency}.")
 
-    rf = _risk_free(daily_rf)
-    if rf is None:
+    risk_free = _risk_free(daily_rf)
+    if risk_free is None:
         return
+    rf, rf_key = risk_free
     frequencies = ["Daily", "Weekly"]
     suggested = default_frequency(list(prices))
+    # The key includes the suggestion, so the default follows it when the ticker mix changes (a widget keeps its own
+    # value for as long as its key is unchanged).
     frequency = st.selectbox(
         "Return frequency", frequencies, index=frequencies.index(suggested), key=f"pf_freq_{suggested}"
     )
@@ -164,7 +174,9 @@ def render() -> None:
         f"({len(data.returns)} {frequency.lower()} returns)."
     )
 
-    _render_analysis(data, prices, current, latest, holdings_value, base_currency, sector_lookup, years, frequency)
+    _render_analysis(
+        data, prices, current, latest, holdings_value, base_currency, sector_lookup, years, frequency, rf_key
+    )
 
 
 def _render_analysis(
@@ -177,7 +189,9 @@ def _render_analysis(
     sector_lookup: SectorLookup,
     years: int | None,
     frequency: str,
+    rf_key: str,
 ) -> None:
+    """Optimizer settings, estimates, weights and bands, frontier, clustering, split-sample test and trade list."""
     tickers = [str(t) for t in data.returns.columns]
     c = float(st.session_state.get("k_fraction", 0.5))
     prior = float(st.session_state.get("prior_sd_annual", 0.10))
@@ -199,7 +213,8 @@ def _render_analysis(
         f"Kelly fraction c = {c:g} and prior SD {prior:.0%} come from the sidebar. Long-only: no shorting or leverage."
     )
 
-    key = "|".join([*tickers, str(data.returns.index[-1].date()), base_currency, str(years), frequency])
+    # Cache key for _analyze: everything `data` was built from (the data itself is not hashed).
+    key = "|".join([*tickers, str(data.returns.index[-1].date()), base_currency, str(years), frequency, rf_key])
     analysis = _analyze(key, prior, c, w_max, gross_max, sector_cap, sectors, data)
     est = analysis.estimates
     cov = est.covariance
@@ -214,27 +229,40 @@ def _render_analysis(
         st.caption(f"The covariance was not positive definite; {cov.jitter:.2e} was added to its diagonal.")
     st.caption("Means are shrunk toward 0 like the Research page's Shrunk Kelly; covariance shrinkage stabilizes Σ⁻¹.")
 
-    if analysis.allocation.fallback:
-        st.warning(f"Constrained optimizer failed — showing EQUAL WEIGHT instead. Reason: {analysis.allocation.reason}")
+    allocation = analysis.allocation
+    if allocation.failed:
+        st.warning(
+            "The constrained optimizer failed, so there is no Constrained Kelly recommendation and no trades are "
+            f"proposed below. The other methods are unaffected. Reason: {allocation.reason}"
+        )
+    elif allocation.status != "optimal":
+        st.caption(
+            f"The solver reported '{allocation.status}'; the solution was checked against every constraint before use."
+        )
 
     table = analysis.weights.copy()
-    table.loc["Cash"] = 1 - table.sum()
+    table.loc["Cash"] = 1 - table.sum(skipna=False)  # a failed (NaN) column stays NaN rather than reading as all cash
     table["Constrained 5%"] = analysis.bands.p5.reindex(table.index)
     table["Constrained 95%"] = analysis.bands.p95.reindex(table.index)
     st.dataframe(table.style.format("{:.1%}", na_rep="—"))
     st.caption(
         f"{UNCONSTRAINED}: c·Σ⁻¹μ — unconstrained: may include shorts and leverage, shown for reference only. "
-        f"Bands: {analysis.bands.resamples} block-bootstrap resamples (5th–95th percentile)."
+        f"Bands: {analysis.bands.solved} block-bootstrap resamples (5th–95th percentile)."
     )
     if analysis.bands.reduced:
         st.info(
             f"Bootstrap reduced to {analysis.bands.resamples} of {analysis.bands.requested} resamples to stay within "
             "the time budget for this many tickers; the bands are a little noisier."
         )
-    if analysis.bands.fallbacks:
-        st.caption(f"{analysis.bands.fallbacks} resamples hit the optimizer fallback (equal weight).")
+    if analysis.bands.failures:
+        st.caption(
+            f"The optimizer failed on {analysis.bands.failures} of {analysis.bands.resamples} resamples; they are "
+            "left out of the bands."
+        )
 
-    st.plotly_chart(weights_chart(analysis.weights, analysis.bands.p5, analysis.bands.p95, banded=CONSTRAINED))
+    # A failed Constrained Kelly column is all NaN; dropping it leaves the chart to the methods that have weights.
+    chart_weights = analysis.weights.dropna(axis=1, how="all")
+    st.plotly_chart(weights_chart(chart_weights, analysis.bands.p5, analysis.bands.p95, banded=CONSTRAINED))
     st.caption("How to read this: bars are weights per method; error bars on Constrained Kelly are its bootstrap band.")
     st.plotly_chart(frontier_chart(analysis.frontier, analysis.marks))
     st.caption(
@@ -253,8 +281,16 @@ def _render_analysis(
         f"In-sample / out-of-sample split: weights estimated on data before {analysis.split_date.date()} and held "
         "fixed (rebalanced each period) afterwards. A full walk-forward version is on the Backtest & Signals page."
     )
+    if analysis.split_failure:
+        st.caption(
+            "Constrained Kelly is not in this chart: the optimizer failed on the first half "
+            f"({analysis.split_failure})."
+        )
 
     st.markdown("**Current vs target (Constrained Kelly)**")
+    if allocation.failed:
+        st.info("No trades proposed: the constrained optimizer failed, so there is no target to trade toward.")
+        return
     target = analysis.weights[CONSTRAINED].to_dict()
     plan = trade_plan(current, target, cost_bps, latest, value_input or None)
     formats = {c: "{:.1%}" for c in plan.table.columns if c != "Trade (shares)"}

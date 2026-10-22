@@ -1,3 +1,5 @@
+"""yfinance implementation of PriceProvider, with retries, typed error mapping and one request per ticker."""
+
 import logging
 import random
 import time
@@ -113,13 +115,17 @@ class YFinanceProvider:
     name = "yfinance"
 
     def __init__(self) -> None:
+        """Configure yfinance (process-wide) for no internal retries and typed errors; start with empty caches."""
         yf.config.network.retries = 0  # retries are handled here, with jitter
         yf.config.debug.hide_exceptions = False  # surface typed errors instead of an empty frame
         self._actions: dict[str, pd.DataFrame] = {}
         self._currency: dict[str, str] = {}
 
     def _history(self, ticker: str, **kwargs: Any) -> pd.DataFrame:
+        """Ticker.history with retries and error mapping; also records the ticker's actions and currency."""
+
         def attempt() -> pd.DataFrame:
+            """One request; exceptions become DataErrors so with_retries can retry the transient ones."""
             try:
                 t = yf.Ticker(ticker)  # the constructor can raise too (and resolves ISIN-like symbols over the network)
                 raw: pd.DataFrame = t.history(
@@ -143,6 +149,7 @@ class YFinanceProvider:
         return with_retries(attempt)
 
     def get_daily_bars(self, ticker: str, start: date | None, end: date | None) -> pd.DataFrame:
+        """Bars from start (None: full history) to end inclusive (None: latest); TickerNotFound if empty."""
         kwargs: dict[str, Any] = {"period": "max"} if start is None else {"start": start.isoformat()}
         if end is not None:
             kwargs["end"] = (end + timedelta(days=1)).isoformat()  # yfinance's end is exclusive
@@ -152,11 +159,19 @@ class YFinanceProvider:
         return bars
 
     def get_corporate_actions(self, ticker: str) -> pd.DataFrame:
+        """
+        Splits and dividends seen by the latest history request for this ticker, so they cover only that request's
+        date range; with no request yet, the full history is fetched.
+        """
         if ticker not in self._actions:
             self._history(ticker, period="max")
         return self._actions[ticker]
 
     def get_currency(self, ticker: str) -> str:
+        """
+        Quote currency from the latest history request. With no request yet, a 5-day request is made; note that it
+        also replaces the cached corporate actions with that request's 5 days.
+        """
         if ticker not in self._currency:
             self._history(ticker, period="5d")
         if ticker not in self._currency:
@@ -171,6 +186,7 @@ class YFinanceProvider:
         """
 
         def attempt() -> str | None:
+            """One request; exceptions become DataErrors so with_retries can retry the transient ones."""
             try:
                 info = yf.Ticker(ticker).get_info()
             except Exception as exc:

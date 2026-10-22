@@ -1,3 +1,7 @@
+"""Fama-French 5-factor and momentum data (Ken French library, downloaded safely and cached in SQLite) and
+factor regressions of a stock's excess returns with Newey-West standard errors.
+"""
+
 import io
 import logging
 import re
@@ -43,6 +47,7 @@ def download(url: str, timeout: float = TIMEOUT_S, max_bytes: int = MAX_DOWNLOAD
         raise ValueError("Factor files must be downloaded over HTTPS")
 
     def attempt() -> bytes:
+        """One download; HTTP and network failures become DataErrors so with_retries can retry the transient ones."""
         request = urllib.request.Request(url, headers={"User-Agent": "stockapp-research"})  # noqa: S310 - https only
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - https only
@@ -120,6 +125,8 @@ def parse_french_csv(text: str, expected_columns: list[str]) -> pd.DataFrame:
     )
     frame.index = pd.DatetimeIndex(pd.to_datetime(frame.pop("date"), format="%Y%m%d"), name="Date")
     frame = frame.astype("float64")
+    # Unit check: in percent, 99% of daily market returns are far below 20 in magnitude. Written as "not <" so a
+    # NaN quantile fails the check too.
     if "Mkt-RF" in frame and not (frame["Mkt-RF"].abs().quantile(0.99) < 20):
         raise FactorFormatError("Mkt-RF magnitudes are not in percent units")
     return (frame / 100).rename(columns=COLUMN_NAMES)
@@ -173,6 +180,8 @@ def newey_west_cov(x: np.ndarray, resid: np.ndarray, lag: int = NEWEY_WEST_LAG) 
 
 @dataclass(frozen=True)
 class FactorFit:
+    """Result of factor_regression: coefficients, Newey-West standard errors, t-statistics, R² and sample size."""
+
     coefs: pd.Series
     """Intercept ("alpha", daily) and factor loadings."""
     std_errors: pd.Series

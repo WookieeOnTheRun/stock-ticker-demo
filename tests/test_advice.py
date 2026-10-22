@@ -13,6 +13,7 @@ from stockapp.advice import (
     decide,
     fan_chart_paths,
     rule_strategy,
+    skill_established,
 )
 from stockapp.backtest.walkforward import walk_forward
 
@@ -35,12 +36,56 @@ def test_hold_without_edge_or_conviction():
     assert held.action == "HOLD" and held.new_position == 0.3
 
 
+def _report(n_known, informative=True, horizon=21, seed=2):
+    """
+    A stand-in ModelReport shaped like walk_forward_model's: out-of-sample probabilities on every decision date, the
+    last `horizon` outcomes not yet known, climatology 0.6 and has_skill computed the same way (Brier vs climatology).
+    """
+    index = pd.bdate_range("2020-01-01", periods=n_known + horizon)
+    outcomes = (np.random.default_rng(seed).random(len(index)) < 0.6).astype(float)
+    probabilities = pd.Series(outcomes * 0.8 + 0.1 if informative else 0.9 - outcomes * 0.8, index=index)
+    labels = pd.Series(outcomes, index=index)
+    labels.iloc[-horizon:] = np.nan
+    climatology = pd.Series(0.6, index=index)
+    known = labels.notna()
+    brier = float(((probabilities - labels)[known] ** 2).mean())
+    brier_climatology = float(((climatology - labels)[known] ** 2).mean())
+    return SimpleNamespace(
+        horizon=horizon,
+        probabilities=probabilities,
+        labels=labels,
+        climatology=climatology,
+        latest_probability=0.9,
+        has_skill=brier < brier_climatology,
+        metrics={"Out-of-sample predictions": float(known.sum())},
+    )
+
+
 def test_no_skill_path_uses_half_and_cannot_buy():
-    no_skill = SimpleNamespace(has_skill=False, latest_probability=0.9)
-    skilled = SimpleNamespace(has_skill=True, latest_probability=0.9)
+    no_skill = _report(900, informative=False)
+    assert not no_skill.has_skill and not skill_established(no_skill)
     assert advice_probability(no_skill) == 0.5
-    assert advice_probability(skilled) == 0.9
     assert decide(_inputs(p=advice_probability(no_skill))).action == "HOLD"
+    skilled = _report(900)
+    assert skill_established(skilled) and advice_probability(skilled) == 0.9
+
+
+def test_beating_climatology_needs_enough_scored_predictions():
+    too_few = _report(MIN_SCORED_FOR_SKILL - 1)
+    assert too_few.has_skill  # beats climatology...
+    assert not skill_established(too_few) and advice_probability(too_few) == 0.5  # ...but on too few predictions
+    just_enough = _report(MIN_SCORED_FOR_SKILL)
+    assert skill_established(just_enough) and advice_probability(just_enough) == 0.9
+
+
+@pytest.mark.parametrize("n_known", [100, MIN_SCORED_FOR_SKILL - 1, MIN_SCORED_FOR_SKILL, 600])
+@pytest.mark.parametrize("informative", [True, False])
+def test_live_gate_is_the_track_record_gate_on_the_latest_date(n_known, informative):
+    report = _report(n_known, informative)
+    gate = causal_skill_gate(report.probabilities, report.labels, report.climatology, report.horizon)
+    track_record_trusts_latest = gate.iloc[-1] == report.probabilities.iloc[-1]  # probabilities are never 0.5 here
+    assert skill_established(report) == track_record_trusts_latest
+    assert skill_established(report) == (report.has_skill and n_known >= MIN_SCORED_FOR_SKILL)
 
 
 def test_sell_and_trim_rules():

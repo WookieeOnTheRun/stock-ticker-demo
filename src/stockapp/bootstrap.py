@@ -1,3 +1,5 @@
+"""Moving-block bootstrap of daily excess returns and the Kelly uncertainty bands built from it."""
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -21,6 +23,8 @@ SEED = 42
 
 @dataclass
 class KellyBand:
+    """Percentiles of a bootstrap Kelly distribution and the share of resamples with f* > 0."""
+
     p5: float
     p50: float
     p95: float

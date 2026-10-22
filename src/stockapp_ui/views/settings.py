@@ -8,6 +8,7 @@ from stockapp_ui import auth, diagnostics, state
 
 
 def _load_watchlist(store: UserStore, sub_hash: str, name: str) -> None:
+    """Button callback: put a saved watchlist into the Portfolio page's ticker box."""
     try:
         tickers = store.load_watchlist(sub_hash, name)
     except UserDataError as exc:
@@ -19,6 +20,7 @@ def _load_watchlist(store: UserStore, sub_hash: str, name: str) -> None:
 
 
 def _load_settings(store: UserStore, sub_hash: str) -> None:
+    """Button callback: apply the saved settings before the sidebar widgets render."""
     try:
         saved = store.load_settings(sub_hash)
     except UserDataError as exc:
@@ -32,18 +34,21 @@ def _load_settings(store: UserStore, sub_hash: str) -> None:
 
 
 def _reset_saved(store: UserStore, sub_hash: str) -> None:
+    """Button callback: delete the saved settings and restore the defaults."""
     store.reset_settings(sub_hash)
     state.reset_to_defaults()
     st.session_state["settings_message"] = ("success", "Saved settings removed; defaults restored.")
 
 
 def _delete_everything(store: UserStore, sub_hash: str) -> None:
+    """Button callback: delete every saved row for this user and clear the confirmation box."""
     store.delete_user_data(sub_hash)
     st.session_state["confirm_delete"] = False
     st.session_state["settings_message"] = ("success", "All your saved data was deleted.")
 
 
 def _saved_state(identity: auth.Identity) -> None:
+    """Watchlist, settings and delete-my-data controls for a signed-in user."""
     store = UserStore()
     sub_hash = identity.sub_hash
 
@@ -88,6 +93,7 @@ def _saved_state(identity: auth.Identity) -> None:
 
 
 def render() -> None:
+    """Render the page: reset, saved state when signed in, and diagnostics when DEBUG_UI=1."""
     st.subheader("Settings")
     st.caption("Ticker, history, base currency and Kelly settings live in the sidebar and are shared by every page.")
     st.button("Reset sidebar settings to defaults", on_click=state.reset_to_defaults)

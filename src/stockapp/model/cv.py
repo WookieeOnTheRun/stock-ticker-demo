@@ -1,3 +1,5 @@
+"""Purged, embargoed K-fold cross-validation for samples whose forward labels overlap."""
+
 import numpy as np
 
 

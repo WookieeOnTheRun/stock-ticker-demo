@@ -1,3 +1,5 @@
+"""Ticker validation, the adjusted-close loader and daily return calculations."""
+
 import re
 
 import numpy as np

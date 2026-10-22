@@ -1,3 +1,5 @@
+"""Relative performance against a benchmark and the stock's SPDR sector ETF."""
+
 import pandas as pd
 
 # yfinance "sector" strings -> SPDR sector ETFs. Every key was observed on a real ticker (yfinance 1.7.0, October

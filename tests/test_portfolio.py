@@ -1,10 +1,13 @@
+import cvxpy as cp
 import numpy as np
 import pandas as pd
 import pytest
 
 from stockapp.estimation import ledoit_wolf, make_spd, shrunk_means
-from stockapp.optimize import ConstrainedKelly, constrained_kelly, hrp_weights, unconstrained_kelly
-from stockapp.portfolio_data import InsufficientDataError, default_frequency, returns_matrix
+from stockapp.optimize import Allocation, ConstrainedKelly, constrained_kelly, hrp_weights, unconstrained_kelly
+from stockapp.portfolio import CONSTRAINED, EQUAL, HRP, analyze_portfolio
+from stockapp.portfolio_bootstrap import bootstrap_weights
+from stockapp.portfolio_data import InsufficientDataError, ReturnsData, default_frequency, returns_matrix
 from stockapp.portfolio_eval import fixed_weight_growth
 from stockapp.portfolio_input import WatchlistError, parse_ticker_text, parse_watchlist_csv
 from stockapp.trades import trade_plan
@@ -37,7 +40,7 @@ def test_constrained_solution_satisfies_constraints(w_max, gross_max, caps):
     sectors = ["tech", "tech", "tech", "energy", "energy", None]
     result = constrained_kelly(mu, sigma, 1.0, w_max=w_max, gross_max=gross_max, sector_caps=caps, sectors=sectors)
     w = result.weights
-    assert not result.fallback
+    assert not result.failed
     assert (w >= -1e-6).all()
     assert (w <= w_max + 1e-6).all()
     assert w.sum() <= gross_max + 1e-6
@@ -56,26 +59,131 @@ def test_loose_constraints_match_scaled_unconstrained():
     np.testing.assert_allclose(result.weights, expected, atol=1e-6)
 
 
-def test_solver_error_falls_back_to_equal_weight(monkeypatch):
+def test_solver_error_twice_gives_no_allocation(monkeypatch):
     solver = ConstrainedKelly(4)
+    calls = []
 
     def boom(*args, **kwargs):
+        calls.append(1)
         raise RuntimeError("solver crashed")
 
     monkeypatch.setattr(solver._problem, "solve", boom)
     result = solver.solve(np.full(4, 0.05), np.eye(4) * 0.04, 0.5)
-    assert result.fallback
-    np.testing.assert_allclose(result.weights, 0.25)
+    assert result.failed
+    assert result.weights is None and result.cash is None and result.status == "failed"
+    assert len(calls) == 2  # the first attempt and one retry
     assert "solver crashed" in result.reason
 
 
-def test_non_optimal_status_falls_back_to_equal_weight(monkeypatch):
+def test_non_optimal_status_gives_no_allocation(monkeypatch):
     solver = ConstrainedKelly(3, gross_max=0.6)
     monkeypatch.setattr(solver._problem, "solve", lambda *args, **kwargs: None)  # status never becomes optimal
     result = solver.solve(np.full(3, 0.05), np.eye(3) * 0.04, 0.5)
-    assert result.fallback
-    np.testing.assert_allclose(result.weights, 0.2)  # gross_max / n
+    assert result.failed and result.weights is None
     assert "not optimal" in result.reason
+
+
+def test_retry_recovers_from_a_failed_first_attempt(monkeypatch):
+    mu = np.array([0.04, 0.03, 0.05])
+    sigma = np.array([[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]])
+    solver = ConstrainedKelly(3, w_max=1.0, gross_max=1.0)
+    real_solve = solver._problem.solve
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("transient")
+        return real_solve(*args, **kwargs)
+
+    monkeypatch.setattr(solver._problem, "solve", flaky)
+    result = solver.solve(mu, sigma, 0.5)
+    assert not result.failed and len(calls) == 2
+    # The retry's jitter (1e-6 x mean variance) barely moves the answer.
+    np.testing.assert_allclose(result.weights, 0.5 * unconstrained_kelly(mu, sigma), atol=1e-5)
+
+
+def test_retry_regularizes_a_singular_covariance():
+    singular = np.array([[0.04, 0.04], [0.04, 0.04]])  # two identical assets: Cholesky fails on the first attempt
+    result = constrained_kelly(np.array([0.05, 0.05]), singular, 0.5, w_max=0.4, gross_max=1.0)
+    assert not result.failed
+    assert (result.weights >= -1e-6).all() and (result.weights <= 0.4 + 1e-6).all()
+
+
+def test_inaccurate_solution_is_used_only_if_it_meets_the_constraints(monkeypatch):
+    solver = ConstrainedKelly(3, w_max=0.4, gross_max=0.9)
+
+    def inaccurate(weights):
+        def fake_solve(*args, **kwargs):
+            solver._w.value = np.asarray(weights, dtype=float)
+            solver._problem._status = cp.OPTIMAL_INACCURATE
+
+        return fake_solve
+
+    monkeypatch.setattr(solver._problem, "solve", inaccurate([0.3, 0.3, 0.2]))
+    accepted = solver.solve(np.full(3, 0.05), np.eye(3) * 0.04, 0.5)
+    assert not accepted.failed and accepted.status == "optimal_inaccurate"
+    np.testing.assert_allclose(accepted.weights, [0.3, 0.3, 0.2])
+
+    monkeypatch.setattr(solver._problem, "solve", inaccurate([0.5, 0.3, 0.1]))  # breaks w_max = 0.4
+    rejected = solver.solve(np.full(3, 0.05), np.eye(3) * 0.04, 0.5)
+    assert rejected.failed and "breaks a constraint" in rejected.reason
+
+
+class _StubSolver:
+    """Stands in for ConstrainedKelly in the bootstrap: fails on every `fail_every`-th call, else weights 0.1 each."""
+
+    def __init__(self, n, fail_every):
+        self.n, self.fail_every, self.calls = n, fail_every, 0
+
+    def solve(self, mu, sigma, c):
+        self.calls += 1
+        if self.calls % self.fail_every == 0:
+            return Allocation(None, None, "failed", "stub failure")
+        return Allocation(np.full(self.n, 0.1), 1 - 0.1 * self.n, "optimal", None)
+
+
+def test_bootstrap_leaves_failed_resamples_out_of_the_bands():
+    excess = _returns(n_obs=300, n_assets=3)
+    bands = bootstrap_weights(excess, 0.10, 252, _StubSolver(3, fail_every=3), 0.5, n_resamples=30, time_budget_s=1e9)
+    assert (bands.resamples, bands.failures, bands.solved) == (30, 10, 20)
+    np.testing.assert_allclose(bands.p5, 0.1)  # only the solved resamples' weights
+    np.testing.assert_allclose(bands.p95, 0.1)
+
+
+def test_bootstrap_bands_are_nan_when_every_resample_fails():
+    excess = _returns(n_obs=300, n_assets=3)
+    bands = bootstrap_weights(excess, 0.10, 252, _StubSolver(3, fail_every=1), 0.5, n_resamples=30, time_budget_s=1e9)
+    assert bands.solved == 0 and bands.failures == bands.resamples
+    assert bands.p5.isna().all() and bands.p95.isna().all()
+
+
+def _returns_data(n_obs=600, n_assets=4):
+    returns = _returns(n_obs=n_obs, n_assets=n_assets)
+    rf = pd.Series(0.0001, index=returns.index, name="rf")
+    return ReturnsData(returns, returns.sub(rf, axis=0), rf, len(returns), 252)
+
+
+def test_failed_optimizer_leaves_constrained_kelly_out_everywhere(monkeypatch):
+    failure = Allocation(None, None, "failed", "stub failure")
+    monkeypatch.setattr(ConstrainedKelly, "solve", lambda self, mu, sigma, c: failure)
+    analysis = analyze_portfolio(_returns_data(), 0.10, 0.5)
+    assert analysis.allocation.failed
+    assert analysis.weights[CONSTRAINED].isna().all()
+    assert analysis.weights[[EQUAL, HRP]].notna().all().all()  # the other methods are unaffected
+    assert CONSTRAINED not in analysis.marks and EQUAL in analysis.marks
+    assert CONSTRAINED not in analysis.split_growth.columns and EQUAL in analysis.split_growth.columns
+    assert analysis.split_failure == "stub failure"
+    assert analysis.frontier.empty and list(analysis.frontier.columns) == ["c", "volatility", "excess_return"]
+    assert analysis.bands.solved == 0 and analysis.bands.p5.isna().all()
+
+
+def test_successful_optimizer_is_in_every_output():
+    analysis = analyze_portfolio(_returns_data(), 0.10, 0.5)
+    assert not analysis.allocation.failed and analysis.split_failure is None
+    assert analysis.weights[CONSTRAINED].notna().all()
+    assert CONSTRAINED in analysis.marks and CONSTRAINED in analysis.split_growth.columns
+    assert not analysis.frontier.empty and analysis.bands.failures == 0
 
 
 def test_ledoit_wolf_is_spd_and_better_conditioned():

@@ -1,3 +1,5 @@
+"""Provider-neutral market data schema (Bars) and the PriceProvider protocol."""
+
 from datetime import date
 from typing import Protocol
 
@@ -18,6 +20,7 @@ class Bars:
 
     @staticmethod
     def empty() -> pd.DataFrame:
+        """An empty frame in the Bars schema."""
         return pd.DataFrame(
             {c: pd.Series(dtype="float64") for c in BAR_COLUMNS}, index=pd.DatetimeIndex([], name="Date")
         )
@@ -35,6 +38,8 @@ class Bars:
 
 
 class PriceProvider(Protocol):
+    """Interface every market data source implements; `name` keys the source's rows in the SQLite cache."""
+
     name: str
 
     def get_daily_bars(self, ticker: str, start: date | None, end: date | None) -> pd.DataFrame:

@@ -1,3 +1,5 @@
+"""Rebalancing trades from current to target weights, with turnover and transaction cost."""
+
 from dataclasses import dataclass
 
 import pandas as pd
@@ -7,6 +9,8 @@ TAX_NOTE = "Taxes are not estimated: that needs your tax lots and jurisdiction."
 
 @dataclass(frozen=True)
 class TradePlan:
+    """The trade table with its turnover and estimated cost."""
+
     table: pd.DataFrame
     """One row per ticker plus Cash: current, target, difference, trade (% of portfolio) and, if known, shares."""
     turnover: float

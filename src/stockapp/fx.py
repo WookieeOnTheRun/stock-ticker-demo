@@ -1,3 +1,5 @@
+"""Currency handling: minor-unit quote currencies, FX pair symbols and conversion of prices to a base currency."""
+
 import pandas as pd
 
 from stockapp.riskfree import align_rf

@@ -21,14 +21,17 @@ FeatureFn = Callable[[pd.Series, pd.Series | None], pd.Series]
 
 
 def _ret(n: int) -> FeatureFn:
+    """Feature: n-day simple return P_t / P_{t-n} - 1."""
     return lambda p, b: p / p.shift(n) - 1
 
 
 def _sma_distance(n: int) -> FeatureFn:
+    """Feature: distance from the n-day simple moving average, P_t / SMA_n(t) - 1."""
     return lambda p, b: p / p.rolling(n).mean() - 1
 
 
 def _realized_vol(p: pd.Series, b: pd.Series | None) -> pd.Series:
+    """Feature: annualized 21-day realized volatility of daily returns."""
     return p.pct_change().rolling(21).std() * math.sqrt(TRADING_DAYS)
 
 
@@ -44,10 +47,12 @@ def _regime(p: pd.Series, b: pd.Series | None) -> pd.Series:
 
 
 def _drawdown_252(p: pd.Series, b: pd.Series | None) -> pd.Series:
+    """Feature: P_t over the highest close of the last 252 days (fewer at the start), minus 1; <= 0."""
     return p / p.rolling(TRADING_DAYS, min_periods=1).max() - 1
 
 
 def _beta_252(p: pd.Series, b: pd.Series | None) -> pd.Series:
+    """Feature: 252-day rolling beta of daily returns to the benchmark's; NaN without a benchmark."""
     if b is None:
         return pd.Series(np.nan, index=p.index)
     r, rb = p.pct_change(), b.reindex(p.index).pct_change()
@@ -55,6 +60,7 @@ def _beta_252(p: pd.Series, b: pd.Series | None) -> pd.Series:
 
 
 def _relative_strength_63(p: pd.Series, b: pd.Series | None) -> pd.Series:
+    """Feature: 63-day return minus the benchmark's 63-day return; NaN without a benchmark."""
     if b is None:
         return pd.Series(np.nan, index=p.index)
     bench = b.reindex(p.index)

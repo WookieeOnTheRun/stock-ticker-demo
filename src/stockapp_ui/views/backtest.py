@@ -3,12 +3,21 @@
 import pandas as pd
 import streamlit as st
 
-from stockapp.advice import BANNER, AdviceInputs, advice_probability, causal_skill_gate, decide
+from stockapp.advice import (
+    BANNER,
+    MIN_SCORED_FOR_SKILL,
+    AdviceInputs,
+    advice_probability,
+    causal_skill_gate,
+    decide,
+    skill_established,
+)
 from stockapp.backtest.cards import signal_cards
 from stockapp.backtest.engine import DEFAULT_COST_BPS
 from stockapp.backtest.strategies import BUY_AND_HOLD
 from stockapp.backtest.walkforward import TRAIN_YEARS, TRIALS_CAPTION, WalkForwardResult
 from stockapp.charts import contributions_chart, drawdowns_chart, fan_chart, growth_chart, reliability_chart
+from stockapp.model.probability import ModelReport
 from stockapp.signals import SIGNALS
 from stockapp_ui.cache import (
     fan_cached,
@@ -22,7 +31,17 @@ from stockapp_ui.cache import (
 from stockapp_ui.context import build_context
 
 
+def _too_few_scored(report: ModelReport) -> str:
+    """Why p is 0.5 for a model that beats climatology: too few scored predictions for the advice skill gate."""
+    scored = int(report.metrics["Out-of-sample predictions"])
+    return (
+        f"The model beats climatology, but on only {scored:,} scored predictions. The advice uses its probability "
+        f"only after at least {MIN_SCORED_FOR_SKILL} (the same gate as the rule's track record), so p is set to 0.5."
+    )
+
+
 def render() -> None:
+    """Render the page: walk-forward backtests and signal cards, the probability model, and the advice rule."""
     ctx = build_context()
     ticker = ctx.ticker
     close_all = ctx.close_all
@@ -61,7 +80,7 @@ def render() -> None:
             f"close earn the next day's return. Walk-forward: train on ≥ {TRAIN_YEARS} years, test the next year, "
             "repeat."
         )
-        bt_prices = close_all.loc[rf_all.index[0] :] if len(rf_all) else close_all
+        bt_prices = close_all.loc[rf_all.index[0] :] if len(rf_all) else close_all  # start with the rf series
         if bt_prices.index[-1] < bt_prices.index[0] + pd.DateOffset(years=TRAIN_YEARS, days=30):
             st.info(f"Backtests need more than {TRAIN_YEARS} years of history; choose a longer History.")
         else:
@@ -72,6 +91,7 @@ def render() -> None:
             no_kelly = ("", 0.0, 0.0, 0.0)
 
             def run_wf(name: str) -> WalkForwardResult:
+                """Cached walk-forward run; only Kelly buy & hold carries the Kelly settings in its cache key."""
                 settings = kelly_settings if name == "Kelly buy & hold" else no_kelly
                 return walk_forward_cached(
                     *bt_args, name, settings, bt_cost, bt_slip, bt_window, periods_per_year, bt_prices, rf_all
@@ -176,6 +196,8 @@ def render() -> None:
                     f"Out-of-sample Brier {report.metrics['Brier']:.4f} beats climatology "
                     f"{report.metrics['Brier (climatology)']:.4f}: some demonstrated skill."
                 )
+                if not skill_established(report):
+                    st.info(_too_few_scored(report))
             else:
                 st.warning(
                     "Model has no demonstrated skill for this ticker: its out-of-sample Brier score "
@@ -236,6 +258,8 @@ def render() -> None:
             st.subheader(f"{advice.action} → target position {advice.new_position:.0%}")
             if not advice_report.has_skill:
                 st.info("The model has no demonstrated out-of-sample skill for this ticker, so p is set to 0.5.")
+            elif not skill_established(advice_report):
+                st.info(_too_few_scored(advice_report))
             st.dataframe(pd.DataFrame({"Fired": advice.clauses}).rename_axis("Rule clause"))
             st.caption(
                 f"Inputs: p = {inputs.p:.2f} (H = {advice_horizon} days), shrunk Kelly 5th percentile = "

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PageSpec:
+    """A page script and the module whose presence enables it."""
+
     path: str
     """Page script, relative to src/app.py."""
     title: str

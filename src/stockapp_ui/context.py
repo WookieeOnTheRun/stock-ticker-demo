@@ -4,6 +4,7 @@ window and the Tier 0 Kelly estimates. Pages that analyse one ticker call build_
 stops the page (st.stop) on unusable input, so the rest of each page can assume valid data.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import date
 
@@ -15,12 +16,29 @@ from stockapp.calendars import is_stale, sessions_per_year
 from stockapp.data import compute_returns, normalize_ticker
 from stockapp.fx import convert_prices, fx_ticker, major_currency
 from stockapp.kelly import KellyResult, excess_returns, fractional_kelly, shrunk_kelly
+from stockapp.providers.errors import DataError
 from stockapp.riskfree import align_rf, daily_rf
 from stockapp_ui import cache, state
+
+logger = logging.getLogger(__name__)
+
+
+def user_message(exc: Exception) -> str:
+    """
+    Text that is safe to show for a data-loading failure. DataError messages are written for end users; any other
+    exception (a database or library error) can carry file paths or internals, so only its type is logged and a
+    generic message is shown instead, in line with showErrorDetails = "none" in .streamlit/config.toml.
+    """
+    if isinstance(exc, DataError):
+        return str(exc)
+    logger.warning("unexpected data error", exc_info=exc, extra={"event": "data_error"})
+    return "an unexpected error occurred"
 
 
 @dataclass
 class ResearchContext:
+    """Settings, data and Tier 0 Kelly results shared by the single-ticker pages; built by build_context()."""
+
     ticker: str
     history_label: str
     years: int | None
@@ -52,10 +70,12 @@ class ResearchContext:
 
     @property
     def max_dd(self) -> float:
+        """Max tolerable drawdown as a fraction (25% -> 0.25)."""
         return self.max_dd_pct / 100
 
     @property
     def rf_key(self) -> str:
+        """The risk-free source for cache keys: the manual rate if one is in use, else "irx"."""
         return str(self.manual_rf_pct) if self.manual_rf_pct is not None else "irx"
 
     @property
@@ -70,6 +90,7 @@ class ResearchContext:
 
     @property
     def method_bands(self) -> dict[str, KellyBand]:
+        """Bootstrap bands by method; only Gaussian and Shrunk have them."""
         return {"Gaussian": self.gauss_band, "Shrunk": self.shrunk_band}
 
     def raw_kelly(self, method_name: str, r: pd.Series, rf: pd.Series) -> float:
@@ -88,6 +109,7 @@ class ResearchContext:
 
 
 def _manual_rf() -> float | None:
+    """Ask for a manual annual risk-free rate because the T-bill rate is unavailable; None until one is entered."""
     st.warning("Couldn't fetch the T-bill rate. Enter a risk-free rate below; a manual rate is in use.")
     value = st.number_input(
         "Annual risk-free rate (%)", min_value=0.0, max_value=20.0, value=None, step=0.1, format="%.2f", key="manual_rf"
@@ -100,6 +122,7 @@ def build_context() -> ResearchContext:
     ss = st.session_state
     history_label, base_currency = str(ss["history"]), str(ss["base_currency"])
     years = state.years()
+    # Risk-free rate: the T-bill series, or a manual rate the user enters when it can't be fetched.
     try:
         rf_annual_pct: pd.Series | None = cache.fetch_rf_cached(years)
     except Exception:
@@ -110,6 +133,7 @@ def build_context() -> ResearchContext:
         if manual_rf_pct is None:
             st.stop()
 
+    # The ticker is validated before any data is requested.
     raw_ticker = str(ss["ticker"])
     if not raw_ticker.strip():
         st.info("Enter a ticker in the sidebar.")
@@ -122,7 +146,7 @@ def build_context() -> ResearchContext:
     try:
         native_close, native_currency = cache.load_close(ticker, years)
     except Exception as e:
-        st.error(f"Could not load data for {ticker}: {e}")
+        st.error(f"Could not load data for {ticker}: {user_message(e)}")
         st.stop()
 
     # Convert to the base currency (minor units such as GBp -> GBP first). Returns, and so Kelly, are measured in it.
@@ -146,10 +170,12 @@ def build_context() -> ResearchContext:
     else:
         st.caption(f"{ticker}: prices in {native_currency} (native), converted to {price_currency}.")
 
+    # Staleness and annualization use the ticker's exchange calendar (252 sessions a year without one).
     if is_stale(ticker, close_all.index[-1].date(), date.today()):
         st.warning(f"Data for {ticker} may be stale: the last bar is from {close_all.index[-1].date()}.")
     periods_per_year = sessions_per_year(ticker, close_all.index[-1].date())
 
+    # Daily returns, kept only on dates that have a risk-free rate.
     returns_all = compute_returns(close_all)
     if rf_annual_pct is not None:
         rf_all = align_rf(daily_rf(rf_annual_pct), pd.DatetimeIndex(returns_all.index))
@@ -175,6 +201,7 @@ def build_context() -> ResearchContext:
     if len(returns_df) < lookback:
         st.warning(f"Only {len(returns_df)} trading days of history available for {ticker}.")
 
+    # Tier 0 Kelly on the lookback window: every method's raw f*, and bootstrap bands for Gaussian and Shrunk.
     rf_df = rf_all.loc[returns_df.index]
     excess = excess_returns(returns_df["simple_return"], rf_df)
     k_fraction, prior_sd_annual = float(ss["k_fraction"]), float(ss["prior_sd_annual"])
@@ -188,6 +215,7 @@ def build_context() -> ResearchContext:
     }
     gauss_band, shrunk_band = cache.bootstrap_bands(excess, prior_sd_annual)
 
+    # Benchmark problems don't stop the page: they are reported on the tabs that need a benchmark.
     benchmark = normalize_ticker(state.benchmark_text())
     benchmark_close: pd.Series | None = None
     benchmark_problem = ""
@@ -199,7 +227,7 @@ def build_context() -> ResearchContext:
         try:
             benchmark_close = cache.load_in_base(benchmark, years, base_currency)
         except Exception as e:
-            benchmark_problem = f"Could not load benchmark {benchmark}: {e}"
+            benchmark_problem = f"Could not load benchmark {benchmark}: {user_message(e)}"
 
     return ResearchContext(
         ticker=ticker,

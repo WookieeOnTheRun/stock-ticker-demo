@@ -1,5 +1,6 @@
 """Streamlit cache layer over stockapp: short in-memory caches over the SQLite store and cached analytics."""
 
+import logging
 from collections.abc import Callable
 
 import pandas as pd
@@ -21,6 +22,8 @@ from stockapp.repository import load_actions, load_bars, load_currency
 from stockapp.riskfree import daily_rf, fetch_rf_annual_pct
 from stockapp.signals import SIGNALS
 from stockapp_ui import state
+
+logger = logging.getLogger(__name__)
 
 # Short in-memory layer over the SQLite cache (stockapp.repository); slider changes only slice the cached data.
 fetch_rf_cached = st.cache_data(ttl=300, show_spinner="Loading risk-free rate...")(fetch_rf_annual_pct)
@@ -73,19 +76,23 @@ def factors_cached() -> pd.DataFrame:
 def risk_cached(
     ticker: str, last_date: str, key: str, ppy: float, _r: pd.Series, _close: pd.Series, _rf: pd.Series
 ) -> risk.RiskSummary:
+    """risk.summarize for the lookback window."""
     return risk.summarize(_r, _close, _rf, ppy)
 
 
 @st.cache_data(show_spinner="Fitting GARCH(1,1)...")
 def garch_cached(ticker: str, last_date: str, key: str, ppy: float, _r: pd.Series) -> risk.GarchForecast | None:
+    """GARCH(1,1) forecast, or None if the fit fails (the page then falls back to EWMA volatility)."""
     try:
         return risk.garch_vol_forecast(_r, periods_per_year=ppy)
     except Exception:
+        logger.warning("GARCH fit failed", exc_info=True, extra={"event": "garch_failed", "ticker": ticker})
         return None
 
 
 @st.cache_data(show_spinner=False)
 def distribution_cached(ticker: str, last_date: str, key: str, _r: pd.Series) -> distribution.DistributionSummary:
+    """distribution.summarize for the lookback window."""
     return distribution.summarize(_r)
 
 
@@ -93,15 +100,18 @@ def distribution_cached(ticker: str, last_date: str, key: str, _r: pd.Series) ->
 def regimes_cached(
     ticker: str, last_date: str, key: str, prior: float, _r: pd.Series, _rf: pd.Series
 ) -> tuple[pd.Series, pd.DataFrame]:
+    """Causal volatility regime labels and Kelly per regime over the returns given (the full history)."""
     labels = regimes.vol_regimes(_r)
     return labels, regimes.kelly_by_regime(_r, _rf, labels, prior)
 
 
 @st.cache_data(show_spinner="Fitting HMM...")
 def hmm_cached(ticker: str, last_date: str, key: str, n_states: int, _r: pd.Series) -> pd.Series | None:
+    """Full-sample HMM regime labels (historical view only), or None if the fit fails."""
     try:
         return regimes.hmm_regimes(_r, n_states)
     except Exception:
+        logger.warning("HMM fit failed", exc_info=True, extra={"event": "hmm_failed", "ticker": ticker})
         return None
 
 
@@ -109,6 +119,7 @@ def hmm_cached(ticker: str, last_date: str, key: str, n_states: int, _r: pd.Seri
 def factor_fit_cached(
     ticker: str, last_date: str, key: str, factors_through: str, _r: pd.Series, _factors: pd.DataFrame
 ) -> factors.FactorFit:
+    """Factor regression of the stock's excess returns; factors_through ties the cache entry to the factor data."""
     return factors.factor_regression(factors.stock_excess_returns(_r, _factors), _factors)
 
 
@@ -131,6 +142,7 @@ def walk_forward_cached(
     _prices: pd.Series,
     _rf: pd.Series,
 ) -> WalkForwardResult:
+    """walk_forward for a strategy by name; mode "rolling" selects rolling training windows, anything else expanding."""
     return walk_forward(
         strategy_by_name(name, kelly_settings),
         _prices,
@@ -173,6 +185,7 @@ def rule_track_record_cached(
     _prices: pd.Series,
     _rf: pd.Series,
 ) -> WalkForwardResult:
+    """Walk-forward record of the advice rule, acting on the causally skill-gated probabilities _p_used."""
     k_frac, prior, dd, p_buy, p_sell = rule_settings
     return walk_forward(
         rule_strategy(_p_used, k_frac, prior, dd, p_buy, p_sell), _prices, _rf, cost_bps, periods_per_year=ppy
@@ -183,6 +196,7 @@ def rule_track_record_cached(
 def fan_cached(
     ticker: str, last_date: str, key: str, fraction: float, _prices: pd.Series, _rf: pd.Series
 ) -> pd.DataFrame:
+    """1-year equity fan at a constant fraction."""
     return fan_chart_paths(_prices, _rf, fraction)
 
 
@@ -200,6 +214,7 @@ def fixed_cached(
     _prices: pd.Series,
     _rf: pd.Series,
 ) -> BacktestResult:
+    """In-sample backtest of one grid point (by index) of a strategy by name."""
     strategy = strategy_by_name(name, kelly_settings)
     return fixed_params(strategy, _prices, strategy.grid[params_index], _rf, cost_bps, slippage_bps, ppy)
 

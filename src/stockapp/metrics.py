@@ -1,3 +1,5 @@
+"""Annualized performance metrics: CAGR, volatility, Sharpe ratio and the approximate growth rate at a fraction."""
+
 import math
 
 import pandas as pd

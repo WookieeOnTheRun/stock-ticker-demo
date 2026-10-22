@@ -1,3 +1,5 @@
+"""Drawdown-constrained Kelly: the largest fraction whose bootstrapped 1-year drawdown stays within a limit."""
+
 import numpy as np
 import pandas as pd
 
@@ -21,10 +23,11 @@ def drawdown_constrained_kelly(
     days is <= max_dd; 0 if none qualifies.
 
     Paths are block-bootstrap resamples of the observed (r, rf) pairs, of length `horizon`. The same
-    paths are used for every f (common random numbers), so results are stable across f and the search
-    is one vectorized (f x paths x days) computation. For each f the equity curve is
-    cumprod(1 + rf + f * (r - rf)), and the max drawdown is max(1 - equity / running peak), with the
-    running peak starting at 1.
+    paths are used for every f (common random numbers), so results are stable across f. Each f is one
+    vectorized (paths x days) computation; looping over the 21 fractions instead of building a single
+    (f x paths x days) array keeps peak memory near 10 MB rather than about 200 MB. For each f the equity
+    curve is cumprod(1 + rf + f * (r - rf)), and the max drawdown is max(1 - equity / running peak), with
+    the running peak starting at 1.
     """
     rf_aligned = rf.reindex(r.index)
     valid = rf_aligned.notna().to_numpy()
@@ -33,11 +36,12 @@ def drawdown_constrained_kelly(
     if r_arr.size < 2:
         return 0.0
     idx = block_bootstrap_indices(r_arr.size, n_resamples=n_paths, block=block, seed=seed, length=horizon)
-    r_paths, rf_paths = r_arr[idx], rf_arr[idx]
-    port = rf_paths[None, :, :] + FRACTION_GRID[:, None, None] * (r_paths - rf_paths)[None, :, :]
-    equity = np.cumprod(1.0 + port, axis=2)
-    peak = np.maximum(np.maximum.accumulate(equity, axis=2), 1.0)
-    max_drawdown = (1.0 - equity / peak).max(axis=2)
-    dd_quantile = np.quantile(max_drawdown, confidence, axis=1)
+    rf_paths = rf_arr[idx]
+    excess_paths = r_arr[idx] - rf_paths
+    dd_quantile = np.empty(FRACTION_GRID.size)
+    for i, f in enumerate(FRACTION_GRID):
+        equity = np.cumprod(1.0 + (rf_paths + f * excess_paths), axis=1)
+        peak = np.maximum(np.maximum.accumulate(equity, axis=1), 1.0)
+        dd_quantile[i] = np.quantile((1.0 - equity / peak).max(axis=1), confidence)
     qualifying = FRACTION_GRID[dd_quantile <= max_dd]
     return float(qualifying.max()) if qualifying.size else 0.0

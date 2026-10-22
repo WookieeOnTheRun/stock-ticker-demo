@@ -1,3 +1,5 @@
+"""SQLite cache for daily bars, corporate actions, per-ticker fetch logs and factor data."""
+
 import re
 import sqlite3
 from collections.abc import Iterator
@@ -43,6 +45,8 @@ FACTOR_COLUMNS = ["mkt_rf", "smb", "hml", "rmw", "cma", "rf", "mom"]
 
 @dataclass(frozen=True)
 class FetchLog:
+    """What was fetched for one (provider, ticker) and when; load_bars decides between cache and provider with it."""
+
     last_fetched_utc: datetime
     first_date: date
     last_date: date
@@ -76,10 +80,12 @@ class Store:
     """
 
     def __init__(self, path: Path | None = None) -> None:
+        """Use the database at path (default config.DB_PATH), which must resolve inside config.DATA_DIR."""
         self.path = resolve_db_path(path if path is not None else config.DB_PATH)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
+        """A new connection with WAL mode and the schema in place, closed on exit; writers wrap it in `with conn`."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=30)
         try:
@@ -109,6 +115,7 @@ class Store:
         return Bars.validate(frame.set_index(index).astype("float64"))
 
     def get_fetch_log(self, provider: str, ticker: str) -> FetchLog | None:
+        """The ticker's fetch log, or None if it has never been fetched."""
         _check_keys(provider, ticker)
         with self._connect() as conn:
             row = conn.execute(

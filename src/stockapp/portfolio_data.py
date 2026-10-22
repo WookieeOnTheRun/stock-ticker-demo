@@ -1,3 +1,5 @@
+"""Aligned multi-asset return matrices (daily or weekly) and excess returns for the portfolio page."""
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -33,6 +35,8 @@ def default_frequency(tickers: list[str]) -> Frequency:
 
 @dataclass(frozen=True)
 class ReturnsData:
+    """Returns, excess returns and the risk-free rate on common dates, with the annualization factor."""
+
     returns: pd.DataFrame
     """Asset returns per period (columns = tickers) on common dates."""
     excess: pd.DataFrame

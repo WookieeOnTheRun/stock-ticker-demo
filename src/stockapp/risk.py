@@ -1,3 +1,5 @@
+"""Single-asset risk analytics: VaR / CVaR, drawdowns, volatility estimates, beta and risk-adjusted ratios."""
+
 import math
 from dataclasses import dataclass
 from statistics import NormalDist
@@ -28,6 +30,8 @@ def parametric_var(r: pd.Series, alpha: float = 0.05) -> float:
 
 @dataclass(frozen=True)
 class Drawdown:
+    """The largest drawdown of a series, with its dates and duration."""
+
     depth: float
     """Largest peak-to-trough fall, as a positive fraction (0.35 = -35%)."""
     peak_date: pd.Timestamp
@@ -75,6 +79,8 @@ def ewma_vol(r: pd.Series, lam: float = 0.94, periods_per_year: float = TRADING_
 
 @dataclass(frozen=True)
 class BetaFit:
+    """OLS fit of daily returns on benchmark returns."""
+
     beta: float
     alpha_annual: float
     """Intercept (daily) * periods_per_year."""
@@ -121,6 +127,8 @@ def omega(r: pd.Series, threshold: float = 0.0) -> float:
 
 @dataclass(frozen=True)
 class GarchForecast:
+    """GARCH(1,1) forecast: horizon-average and daily volatility, fitted parameters and whether the fit converged."""
+
     annualized_vol: float
     """Average forecast volatility over the horizon, annualized."""
     path: np.ndarray
@@ -151,6 +159,8 @@ def garch_vol_forecast(r: pd.Series, horizon: int = 21, periods_per_year: float 
 
 @dataclass(frozen=True)
 class RiskSummary:
+    """Every non-GARCH risk analytic from summarize()."""
+
     historical_var: float
     historical_cvar: float
     parametric_var: float

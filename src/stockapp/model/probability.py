@@ -1,3 +1,7 @@
+"""Calibrated walk-forward probability model: LightGBM plus isotonic calibration, predicting whether a stock beats
+the T-bill rate over the next H trading days, with out-of-sample scoring against climatology.
+"""
+
 import logging
 from dataclasses import dataclass, field
 
@@ -39,6 +43,7 @@ def log_loss(p: np.ndarray, y: np.ndarray) -> float:
 
 
 def _classifier(params: dict[str, int]) -> lgb.LGBMClassifier:
+    """An unfitted LightGBM classifier for one grid point, with the fixed settings above."""
     return lgb.LGBMClassifier(
         num_leaves=params["num_leaves"],
         n_estimators=params["n_estimators"],
@@ -67,6 +72,7 @@ class WindowModel:
     features: list[str] = field(default_factory=list)
 
     def predict(self, x: pd.DataFrame) -> np.ndarray:
+        """Calibrated P(label = 1) for each row of x, using the columns the model was trained on."""
         raw = _proba(self.model, x[self.features])
         return np.asarray(self.calibrator.predict(raw), dtype=float)
 
@@ -105,6 +111,8 @@ def fit_window(x: pd.DataFrame, y: pd.Series, horizon: int) -> WindowModel:
 
 @dataclass(frozen=True)
 class ModelReport:
+    """Output of walk_forward_model: out-of-sample predictions and scores, plus the latest prediction."""
+
     horizon: int
     probabilities: pd.Series
     """Stitched out-of-sample calibrated P(excess return > 0 over the horizon), one per decision date."""
@@ -164,7 +172,7 @@ def walk_forward_model(
         fold_params.append(window.params)
         decisions = features.loc[train_end:test_end]
         if k < len(folds) - 1:
-            decisions = decisions.iloc[:-1]
+            decisions = decisions.iloc[:-1]  # the next fold decides at this fold's last test close
         probs.append(pd.Series(window.predict(decisions), index=decisions.index))
         clim.append(pd.Series(window.base_rate, index=decisions.index))
     probabilities = pd.concat(probs).rename("p")

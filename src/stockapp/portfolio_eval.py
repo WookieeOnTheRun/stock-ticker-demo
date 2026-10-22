@@ -1,3 +1,5 @@
+"""Split-sample evaluation of fixed portfolio weights."""
+
 import numpy as np
 import pandas as pd
 

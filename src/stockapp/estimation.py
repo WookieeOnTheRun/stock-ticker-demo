@@ -1,3 +1,5 @@
+"""Portfolio inputs: shrunk expected excess returns and the Ledoit-Wolf covariance, annualized."""
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +22,8 @@ def shrunk_means(excess: pd.DataFrame, prior_sd_annual: float, periods_per_year:
 
 @dataclass(frozen=True)
 class CovarianceEstimate:
+    """Ledoit-Wolf covariance with its shrinkage intensity, condition numbers and any diagonal jitter."""
+
     sigma: np.ndarray
     """Ledoit-Wolf covariance per period, symmetric positive definite (after any jitter)."""
     shrinkage: float
@@ -74,6 +78,8 @@ def ledoit_wolf(excess: pd.DataFrame, diagnostics: bool = True) -> CovarianceEst
 
 @dataclass(frozen=True)
 class Estimates:
+    """Annualized optimizer inputs; array positions follow `tickers`."""
+
     tickers: list[str]
     mu: np.ndarray
     """Annualized shrunk expected excess returns."""
