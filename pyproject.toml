@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockapp"
+version = "0.1.0"
+description = "Streamlit app that computes fractional Kelly allocations from historical daily returns."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit[auth]>=1.66,<2",
+    "yfinance>=1.7,<2",
+    "pandas>=3.0,<4",
+    "numpy>=2.5,<3",
+    "plotly>=7.1,<8",
+    "exchange_calendars>=4.13,<5",
+    "arch>=8.0,<9",
+    "scipy>=1.18,<2",
+    "hmmlearn>=0.3.3,<0.4",
+    "scikit-learn>=1.9,<2",
+    "cvxpy-base>=1.9,<2",  # cvxpy without its bundled solvers (saves ~160 MB); CLARABEL is the one we use
+    "clarabel>=0.11,<1",
+    "lightgbm>=4.7,<5",
+    "jinja2>=3.1,<4",
+    "markupsafe>=3.0,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.17,<0.18",
+    "mypy>=2.4,<3",
+    "pip-audit>=2.10,<3",
+    "hypothesis>=6.170,<7",
+    "pip-tools>=7.6,<8",
+    "pandas-stubs>=3.0,<4",
+    "pre-commit>=4.7,<5",
+    "scipy-stubs>=1.18,<2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: timing tests that assert performance budgets"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+# "strict" is a global-only option in mypy, so it applies to whatever is checked; only src/stockapp is
+# checked (app.py stays unchecked).
+files = ["src/stockapp"]
+strict = true
+
+[[tool.mypy.overrides]]
+# None of these ships a py.typed marker and no stub package exists on PyPI. For sklearn the only one is an unofficial
+# third-party repackage (scikit-learn-stubs 0.0.3), not worth the supply-chain risk for one class.
+module = [
+    "yfinance", "yfinance.*", "plotly", "plotly.*", "exchange_calendars", "exchange_calendars.*", "hmmlearn", "hmmlearn.*", "sklearn", "sklearn.*",
+]
+ignore_missing_imports = true

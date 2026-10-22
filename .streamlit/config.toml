@@ -1,5 +1,27 @@
+# Keys checked against `streamlit config show` for Streamlit 1.66.
+
 [theme]
 base = "light"
 primaryColor = "#4CAF50"
 backgroundColor = "#FFFFFF"
 textColor = "#222222"
+
+[server]
+# Reject cross-site form/upload requests without a valid XSRF token (default true; set explicitly).
+enableXsrfProtection = true
+# CORS protection on (default true). With an empty allow-list only same-origin requests are accepted; add your public
+# origin(s) here if the app is served behind a proxy on a different origin, e.g. ["https://kelly.example.com"].
+enableCORS = true
+corsAllowedOrigins = []
+# Upload cap in MB, matching the 1 MB watchlist CSV limit enforced in stockapp.portfolio_input.
+maxUploadSize = 1
+
+[browser]
+# Don't send usage statistics to Streamlit.
+gatherUsageStats = false
+
+[client]
+# "none": end users see generic error messages; exception details and tracebacks go only to the server logs.
+showErrorDetails = "none"
+# "viewer": hide developer options (rerun, clear cache, deploy) from the toolbar for end users.
+toolbarMode = "viewer"

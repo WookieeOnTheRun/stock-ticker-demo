@@ -2,3 +2,13 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+docs/prompts/*
+.streamlit/secrets.toml
+/data/
+*.sqlite
+*.db
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/

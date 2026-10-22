@@ -1,11 +1,11 @@
+"""Ticker validation, the adjusted-close loader and daily return calculations."""
+
 import re
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 TICKER_PATTERN = re.compile(r"[A-Z0-9.^=\-]{1,15}")
-HISTORY_PERIOD = "5y"  # ~1250 trading days; covers the max lookback slider value and all Kelly windows
 
 
 def normalize_ticker(raw: str) -> str | None:
@@ -16,15 +16,13 @@ def normalize_ticker(raw: str) -> str | None:
 
 def fetch_price_history(ticker: str) -> pd.Series:
     """
-    Fetch split/dividend-adjusted daily closes for the last HISTORY_PERIOD.
-    Uses yfinance (free, no API key). Returns a float Series named "Close" indexed by Date.
-    Raises LookupError if no data is returned, so empty results are never cached.
+    Split/dividend-adjusted daily closes for the last 10 years, from the cached data layer
+    (stockapp.repository.load_bars). Returns a float Series named "Close" indexed by Date.
+    Raises TickerNotFound (a LookupError) if no data is returned, so empty results are never cached.
     """
-    df = yf.download(ticker, period=HISTORY_PERIOD, progress=False, auto_adjust=True, multi_level_index=False)
-    if df.empty or "Close" not in df:
-        raise LookupError(f"No price data returned for '{ticker}'. Check the ticker symbol.")
-    close = df["Close"].dropna().astype(float).sort_index()
-    close.index = pd.to_datetime(close.index)
+    from stockapp.repository import load_bars  # deferred: repository imports normalize_ticker from this module
+
+    close = load_bars(ticker)["adj_close"].rename("Close")
     close.index.name = "Date"
     return close
 
