@@ -47,7 +47,7 @@ cfgv==3.5.0
 charset-normalizer==3.5.2
     # via requests
 clarabel==0.11.1
-    # via cvxpy
+    # via stockapp (pyproject.toml)
 click==8.5.0
     # via
     #   pip-tools
@@ -61,7 +61,7 @@ cryptography==50.0.2
     #   joserfc
 curl-cffi==0.16.3
     # via yfinance
-cvxpy==1.9.3
+cvxpy-base==1.9.3
     # via stockapp (pyproject.toml)
 cyclonedx-python-lib==11.12.0
     # via pip-audit
@@ -82,8 +82,6 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
-highspy==1.15.1
-    # via cvxpy
 hmmlearn==0.3.3
     # via stockapp (pyproject.toml)
 httpcore==1.0.9
@@ -108,13 +106,10 @@ itsdangerous==2.2.0
 jinja2==3.1.6
     # via
     #   altair
-    #   osqp
     #   pydeck
     #   stockapp (pyproject.toml)
 joblib==1.6.0
-    # via
-    #   osqp
-    #   scikit-learn
+    # via scikit-learn
 joserfc==1.7.7
     # via authlib
 jsonschema==4.26.0
@@ -160,15 +155,13 @@ numpy==2.5.4
     # via
     #   arch
     #   clarabel
-    #   cvxpy
+    #   cvxpy-base
     #   exchange-calendars
     #   formulaic
-    #   highspy
     #   hmmlearn
     #   lightgbm
     #   numpy-typing-compat
     #   optype
-    #   osqp
     #   pandas
     #   pandas-stubs
     #   patsy
@@ -176,7 +169,6 @@ numpy==2.5.4
     #   qdldl
     #   scikit-learn
     #   scipy
-    #   scs
     #   sparsediffpy
     #   statsmodels
     #   stockapp (pyproject.toml)
@@ -186,8 +178,6 @@ numpy-typing-compat==20260602.2.5
     # via optype
 optype==0.19.0
     # via scipy-stubs
-osqp==1.1.3
-    # via cvxpy
 packageurl-python==0.17.6
     # via cyclonedx-python-lib
 packaging==26.3
@@ -279,7 +269,7 @@ pytz==2026.5
 pyyaml==6.0.3
     # via pre-commit
 qdldl==0.1.9.post1
-    # via cvxpy
+    # via cvxpy-base
 referencing==0.37.0
     # via
     #   jsonschema
@@ -306,20 +296,16 @@ scipy==1.18.1
     # via
     #   arch
     #   clarabel
-    #   cvxpy
+    #   cvxpy-base
     #   formulaic
     #   hmmlearn
     #   lightgbm
-    #   osqp
     #   qdldl
     #   scikit-learn
-    #   scs
     #   statsmodels
     #   stockapp (pyproject.toml)
 scipy-stubs==1.18.1.1
     # via stockapp (pyproject.toml)
-scs==3.3.1
-    # via cvxpy
 six==1.17.0
     # via python-dateutil
 sortedcontainers==2.4.0
@@ -329,7 +315,7 @@ sortedcontainers==2.4.0
 soupsieve==3.0.3
     # via beautifulsoup4
 sparsediffpy==0.6.1
-    # via cvxpy
+    # via cvxpy-base
 starlette==1.9.0
     # via streamlit
 statsmodels==0.15.0
@@ -383,6 +369,4 @@ pip==26.2.2
     #   pip-api
     #   pip-tools
 setuptools==84.2.0
-    # via
-    #   osqp
-    #   pip-tools
+    # via pip-tools

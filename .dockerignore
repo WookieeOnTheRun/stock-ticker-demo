@@ -1,0 +1,20 @@
+# Only src/, pyproject.toml, requirements.lock and .streamlit/config.toml are copied; keep everything else out of
+# the build context, especially secrets and local data.
+.git
+.github
+.venv
+venv
+data/
+tests/
+docs/
+.streamlit/secrets.toml
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+*.egg-info
+dist/
+build/
+reports/
