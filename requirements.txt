@@ -302,7 +302,7 @@ soupsieve==3.0.3
     # via
     #   -c requirements.lock
     #   beautifulsoup4
-sparsediffpy==0.6.1
+sparsediffpy==0.8.0
     # via
     #   -c requirements.lock
     #   cvxpy-base
