@@ -306,7 +306,7 @@ sparsediffpy==0.6.1
     # via
     #   -c requirements.lock
     #   cvxpy-base
-starlette==1.9.0
+starlette==1.10.0
     # via
     #   -c requirements.lock
     #   streamlit
