@@ -233,7 +233,7 @@ pyarrow==26.0.0
     # via
     #   -c requirements.lock
     #   streamlit
-pycparser==3.11
+pycparser==3.12
     # via
     #   -c requirements.lock
     #   cffi
